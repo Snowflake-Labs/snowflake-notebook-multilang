@@ -1,0 +1,40 @@
+# =============================================================================
+# Julia Only -- Preset Configuration
+# =============================================================================
+# Usage: sfnb-setup install --config configs/julia_only.yaml
+# =============================================================================
+
+env_name: "workspace_env"
+
+languages:
+  r:
+    enabled: false
+
+  scala:
+    enabled: false
+
+  julia:
+    enabled: true
+    julia_version: ""
+    julia_packages:
+      - DataFrames
+      - CSV
+      - Arrow
+      - Statistics
+      - LinearAlgebra
+      - PythonCall
+    depot_path: "auto"
+    snowflake_odbc:
+      enabled: false
+      driver_version: "3.15.0"
+    sysimage:
+      enabled: false
+      packages:
+        - DataFrames
+        - CSV
+        - Arrow
+    juliacall:
+      threads: "auto"
+      optimize: 2
+      handle_signals: true
+      startup_file: false

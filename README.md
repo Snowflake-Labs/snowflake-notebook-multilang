@@ -1,0 +1,123 @@
+# snowflake-notebook-multilang
+
+Multi-language support (R, Scala/Java, Julia) for Snowflake Workspace Notebooks.
+
+This toolkit installs and configures language runtimes, packages, and
+notebook magic commands so you can use R, Scala, Java, and Julia alongside
+Python in Snowflake Workspace Notebooks.
+
+## Quick Start
+
+```python
+# Cell 1: Install the toolkit
+!pip install sfnb-multilang
+
+# Cell 2: Install R and Scala
+from sfnb_multilang import install
+install(languages=["r", "scala"])
+
+# Cell 3: Set up R
+from r_helpers import setup_r_environment
+setup_r_environment()
+
+# Cell 4: Use R
+%%R
+library(dplyr)
+mtcars %>% group_by(cyl) %>% summarise(mean_mpg = mean(mpg))
+```
+
+## Features
+
+- **Single command** installs any combination of R, Scala/Java, and Julia
+- **Fast** -- R base in ~20s, Scala/Java in ~30s, R + ADBC + DuckDB in ~2.5 min, Scala + Spark Connect in ~40s, cached re-runs in ~2s
+- **Shared infrastructure** -- micromamba and JDK are installed once, not per-language
+- **Automatic EAI setup** -- generates and optionally applies network rules
+- **Configuration-driven** -- YAML config with CLI flag overrides
+- **Extensible** -- add new languages by implementing a Python plugin class
+- **Structured logging** -- configurable text or JSON log output
+
+## Installation
+
+```bash
+pip install sfnb-multilang
+```
+
+## Usage
+
+### From a Notebook Cell (Programmatic API)
+
+```python
+from sfnb_multilang import install, generate_eai_sql, apply_eai
+
+# Install with a config file
+install(config="config.yaml")
+
+# Install with keyword arguments
+install(languages=["r", "scala"], r_adbc=True)
+
+# Generate EAI SQL (prints to output)
+sql = generate_eai_sql(languages=["r", "scala"])
+print(sql)
+
+# Apply EAI directly (requires CREATE INTEGRATION privilege)
+apply_eai(session, languages=["r", "scala"])
+```
+
+### From the Command Line (CLI)
+
+```bash
+# Install from config
+sfnb-setup install --config config.yaml
+
+# Install specific languages
+sfnb-setup install --r --scala --verbose
+
+# Generate EAI SQL
+sfnb-setup generate-eai --r --scala --account myaccount
+
+# Validate existing installation
+sfnb-setup validate --config config.yaml
+
+# Migrate per-language YAML configs to unified format
+sfnb-setup migrate-config \
+  --r-config r_packages.yaml \
+  --scala-config scala_packages.yaml \
+  --output config.yaml
+```
+
+## Preset Configurations
+
+Ready-made configs in the `configs/` directory:
+
+| File | Languages |
+|---|---|
+| `default.yaml` | R + Scala/Java + Julia |
+| `r_only.yaml` | R |
+| `scala_only.yaml` | Scala/Java |
+| `julia_only.yaml` | Julia |
+| `r_scala.yaml` | R + Scala/Java |
+
+## Network Rules (EAI)
+
+Snowflake Workspace Notebooks block outbound traffic by default. The
+toolkit can automatically generate (and optionally apply) the External
+Access Integration SQL needed for package downloads.
+
+See [docs/network_rules.md](docs/network_rules.md) for details.
+
+## Documentation
+
+- [Quick Start Guide](docs/quickstart.md)
+- [Configuration Reference](docs/configuration.md)
+- [Network Rules](docs/network_rules.md)
+- [Adding a New Language](docs/adding_a_language.md)
+
+## Requirements
+
+- Python >= 3.9 (included in Snowflake Workspace Notebooks)
+- `pyyaml >= 6.0`
+- Network access configured via EAI
+
+## License
+
+Apache 2.0. See [LICENSE](LICENSE).

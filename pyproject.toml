@@ -1,0 +1,64 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "sfnb-multilang"
+version = "0.1.0"
+description = "Multi-language support (R, Scala/Java, Julia) for Snowflake Workspace Notebooks"
+readme = "README.md"
+license = {text = "Apache-2.0"}
+requires-python = ">=3.9"
+authors = [
+    {name = "Snowflake-Labs"},
+]
+keywords = ["snowflake", "notebook", "multilang", "R", "scala", "julia"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering",
+]
+dependencies = [
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov",
+    "ruff",
+    "mypy",
+]
+
+[project.scripts]
+sfnb-setup = "sfnb_multilang.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/Snowflake-Labs/snowflake-notebook-multilang"
+Documentation = "https://github.com/Snowflake-Labs/snowflake-notebook-multilang/tree/main/docs"
+Issues = "https://github.com/Snowflake-Labs/snowflake-notebook-multilang/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/sfnb_multilang"]
+
+[tool.ruff]
+target-version = "py39"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+
+[tool.mypy]
+python_version = "3.9"
+warn_return_any = true
+warn_unused_configs = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

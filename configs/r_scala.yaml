@@ -1,0 +1,42 @@
+# =============================================================================
+# R + Scala/Java -- Preset Configuration (most common combo)
+# =============================================================================
+# Usage: sfnb-setup install --config configs/r_scala.yaml
+# =============================================================================
+
+env_name: "workspace_env"
+
+languages:
+  r:
+    enabled: true
+    r_version: ""
+    conda_packages:
+      - r-tidyverse
+      - r-dbplyr
+      - r-httr2
+      - r-lazyeval
+      - r-reticulate>=1.25
+    cran_packages: []
+    addons:
+      adbc: false
+      duckdb: false
+
+  scala:
+    enabled: true
+    java_version: "17"
+    scala_version: "2.12"
+    snowpark_version: "1.18.0"
+    ammonite_version: "3.0.8"
+    jvm_heap: "auto"
+    jvm_options:
+      - "-Xms256m"
+      - "--add-opens=java.base/java.nio=ALL-UNNAMED"
+    extra_dependencies:
+      - "org.slf4j:slf4j-nop:1.7.36"
+    spark_connect:
+      enabled: false
+      pyspark_version: "3.5.6"
+      server_port: 15002
+
+  julia:
+    enabled: false

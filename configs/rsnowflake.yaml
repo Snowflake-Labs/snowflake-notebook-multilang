@@ -1,0 +1,41 @@
+# =============================================================================
+# RSnowflake -- DBI Connector Preset
+# =============================================================================
+# Minimal R environment for the RSnowflake DBI package.
+# Includes ADBC for high-performance Arrow-native reads/writes.
+#
+# Usage:
+#   from sfnb_multilang import install
+#   install(config="configs/rsnowflake.yaml")
+#
+#   # or CLI:
+#   sfnb-setup install --config configs/rsnowflake.yaml
+# =============================================================================
+
+env_name: "workspace_env"
+
+languages:
+  r:
+    enabled: true
+    r_version: ""
+    conda_packages:
+      - r-dbi>=1.2.0
+      - r-httr2>=1.0.0
+      - r-jsonlite
+      - r-rlang>=1.0.0
+      - r-cli
+      - r-dbplyr>=2.3.0
+      - r-dplyr>=1.1.0
+      - r-nanoarrow
+      - r-reticulate>=1.25
+      - r-rcppsimdjson
+    cran_packages: []
+    addons:
+      adbc: true
+      duckdb: true
+
+  scala:
+    enabled: false
+
+  julia:
+    enabled: false

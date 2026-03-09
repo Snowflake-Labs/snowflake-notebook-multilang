@@ -1,0 +1,37 @@
+# =============================================================================
+# snowflake-notebook-multilang .gitignore
+# =============================================================================
+
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Logs
+*.log
+
+# Generated files
+eai_setup.sql
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*~
+.cursor/
+
+# Environment
+.venv/
+venv/
+.conda/
