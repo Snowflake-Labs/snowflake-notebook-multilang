@@ -83,7 +83,7 @@ class Installer:
         self.config = config
         self.plugins = get_enabled_plugins(config)
 
-    def install(self) -> InstallReport:
+    def install(self, quiet: bool = False) -> InstallReport:
         report = InstallReport()
 
         if not self.plugins:
@@ -173,7 +173,7 @@ class Installer:
 
         # Phase 8: Summary
         report.finalize()
-        self._print_summary(report)
+        self._print_summary(report, quiet=quiet)
         return report
 
     # -----------------------------------------------------------------
@@ -351,7 +351,23 @@ class Installer:
     # Summary
     # -----------------------------------------------------------------
 
-    def _print_summary(self, report: InstallReport) -> None:
+    def _print_summary(self, report: InstallReport, quiet: bool = False) -> None:
+        lang_statuses = []
+        for plugin in self.plugins:
+            pr = report.plugin_results.get(plugin.name)
+            vr = report.validation_results.get(plugin.name)
+            ok = pr and pr.success and vr and vr.success
+            version = (pr.version if pr else "") or "?"
+            lang_statuses.append((plugin, ok, version))
+
+        if quiet:
+            parts = []
+            for plugin, ok, version in lang_statuses:
+                parts.append(f"{plugin.display_name}: {'OK' if ok else 'FAILED'} ({version})")
+            status_word = "complete" if report.success else "finished with errors"
+            print(f"Installation {status_word} in {report.elapsed_seconds:.1f}s -- {', '.join(parts)}")
+            return
+
         logger.info("=" * 70)
         logger.info("Installation %s", "Complete!" if report.success else "Finished with errors")
         logger.info("=" * 70)
@@ -361,12 +377,8 @@ class Installer:
         logger.info("Duration:    %.1fs", report.elapsed_seconds)
         logger.info("")
 
-        for plugin in self.plugins:
-            pr = report.plugin_results.get(plugin.name)
-            vr = report.validation_results.get(plugin.name)
-            status = "OK" if (pr and pr.success and vr and vr.success) else "FAILED"
-            version = (pr.version if pr else "") or "?"
-            logger.info("  %s: %s (%s)", plugin.display_name, status, version)
+        for plugin, ok, version in lang_statuses:
+            logger.info("  %s: %s (%s)", plugin.display_name, "OK" if ok else "FAILED", version)
 
         logger.info("")
         for plugin in self.plugins:

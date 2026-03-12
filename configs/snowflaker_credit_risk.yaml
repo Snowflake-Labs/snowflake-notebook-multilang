@@ -1,0 +1,43 @@
+# =============================================================================
+# snowflakeR -- Credit Risk Demo Preset
+# =============================================================================
+# R environment for the credit risk scoring demo notebook.  Includes the full
+# tidymodels stack (recipes, parsnip, workflows, yardstick, rsample, tune)
+# plus XGBoost and ranger engines -- all pre-compiled from conda-forge.
+#
+# Usage:
+#   from sfnb_multilang import install
+#   install(config="configs/snowflaker_credit_risk.yaml")
+#
+#   # or CLI:
+#   sfnb-setup install --config configs/snowflaker_credit_risk.yaml
+# =============================================================================
+
+env_name: "workspace_env"
+
+languages:
+  r:
+    enabled: true
+    r_version: ""
+    conda_packages:
+      - r-tidyverse
+      - r-dbplyr
+      - r-dbi>=1.2.0
+      - r-httr2
+      - r-jsonlite
+      - r-nanoarrow
+      - r-lazyeval
+      - r-reticulate>=1.25
+      - r-tidymodels
+      - r-xgboost
+      - r-ranger
+    cran_packages: []
+    addons:
+      adbc: false
+      duckdb: false
+
+  scala:
+    enabled: false
+
+  julia:
+    enabled: false

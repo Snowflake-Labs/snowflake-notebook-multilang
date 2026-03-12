@@ -874,12 +874,6 @@ rlines <- function(...) {
   invisible(NULL)
 }
 
-message("Output helpers loaded (use these for cleaner formatting):")
-message("  - rprint(x)      : Print any object cleanly")
-message("  - rview(df, n)   : View data frame (optional row limit)")
-message("  - rglimpse(df)   : Glimpse data frame structure")
-message("  - rcat(...)      : Clean replacement for cat()")
-message("  - rlines(...)    : Print multiple lines cleanly")
 '''
 
 

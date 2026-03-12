@@ -1,0 +1,38 @@
+# =============================================================================
+# snowflakeR -- Forecasting Demo Preset
+# =============================================================================
+# Extends the snowflakeR ML preset with the `forecast` package and its
+# dependencies installed via conda (faster and avoids CRAN stdin prompts
+# that fail in Workspace Notebooks).
+#
+# Usage:
+#   from sfnb_multilang import install
+#   install(config="configs/snowflaker_forecast.yaml")
+#
+#   # or CLI:
+#   sfnb-setup install --config configs/snowflaker_forecast.yaml
+# =============================================================================
+
+env_name: "workspace_env"
+
+languages:
+  r:
+    enabled: true
+    r_version: ""
+    conda_packages:
+      - r-tidyverse
+      - r-dbplyr
+      - r-httr2
+      - r-lazyeval
+      - r-reticulate>=1.25
+      - r-forecast>=8.0
+    cran_packages: []
+    addons:
+      adbc: false
+      duckdb: false
+
+  scala:
+    enabled: false
+
+  julia:
+    enabled: false

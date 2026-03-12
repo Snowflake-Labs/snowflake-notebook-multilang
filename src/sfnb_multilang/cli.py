@@ -35,6 +35,8 @@ def _build_parser() -> argparse.ArgumentParser:
                            help="Skip EAI setup")
     p_install.add_argument("--account", default="", help="Snowflake account for EAI")
     p_install.add_argument("--verbose", "-v", action="store_true")
+    p_install.add_argument("--quiet", "-q", action="store_true",
+                           help="Suppress INFO messages; show only a final summary")
     p_install.add_argument("--force", action="store_true", help="Force reinstall")
     p_install.add_argument("--dry-run", action="store_true",
                            help="Show what would be installed")
@@ -107,7 +109,9 @@ def _load_and_override(args) -> ToolkitConfig:
 
 def cmd_install(args) -> int:
     cfg = _load_and_override(args)
-    setup_logging(level=cfg.logging.level, log_file=cfg.logging.log_file or None)
+    quiet = getattr(args, "quiet", False)
+    log_level = "WARNING" if quiet else cfg.logging.level
+    setup_logging(level=log_level, log_file=cfg.logging.log_file or None)
 
     if args.dry_run:
         from .installer import Installer
@@ -122,7 +126,7 @@ def cmd_install(args) -> int:
 
     from .installer import Installer
     installer = Installer(cfg)
-    report = installer.install()
+    report = installer.install(quiet=quiet)
     return 0 if report.success else 1
 
 

@@ -21,6 +21,7 @@ __version__ = "0.1.0"
 def install(
     config: str | None = None,
     languages: list[str] | None = None,
+    quiet: bool = False,
     **kwargs,
 ):
     """Install language runtimes into the current Workspace Notebook.
@@ -28,6 +29,8 @@ def install(
     Args:
         config: Path to a YAML config file, or None for defaults.
         languages: List of languages to enable (e.g. ["r", "scala"]).
+        quiet: If True, suppress INFO messages and only show a final
+            summary line.  Errors and warnings are always shown.
         **kwargs: Additional overrides (r_adbc, r_duckdb, verbose, force).
     """
     from .config import ToolkitConfig, apply_cli_overrides, load_config
@@ -44,10 +47,11 @@ def install(
         overrides["languages"] = languages
     cfg = apply_cli_overrides(cfg, **overrides)
 
-    setup_logging(level=cfg.logging.level, log_file=cfg.logging.log_file or None)
+    log_level = "WARNING" if quiet else cfg.logging.level
+    setup_logging(level=log_level, log_file=cfg.logging.log_file or None)
 
     installer = Installer(cfg)
-    return installer.install()
+    return installer.install(quiet=quiet)
 
 
 def generate_eai_sql(
