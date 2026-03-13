@@ -18,7 +18,7 @@ force_reinstall: false
 languages:
   r:
     enabled: true
-    r_version: ""
+    r_version: "4.5.2"   # pin to known-good conda-forge R; bump when packages are rebuilt
     conda_packages:
       - r-tidyverse
       - r-dbplyr
