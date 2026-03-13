@@ -71,8 +71,12 @@ def _bootstrap():
                 os.environ.setdefault(var, pkg_dir)
 
     if not importlib.util.find_spec("sfnb_multilang"):
+        _GITHUB_URL = (
+            "sfnb-multilang @ https://github.com/Snowflake-Labs/"
+            "snowflake-notebook-multilang/archive/refs/heads/main.zip"
+        )
         subprocess.check_call(
-            [sys.executable, "-m", "pip", "install", "-q", "sfnb-multilang"])
+            [sys.executable, "-m", "pip", "install", "-q", _GITHUB_URL])
 
 
 _bootstrap()
