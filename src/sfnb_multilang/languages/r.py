@@ -40,6 +40,15 @@ class RPlugin(LanguagePlugin):
             entry = f"r-base={r_cfg.r_version}" if r_cfg.r_version else "r-base"
             packages.insert(0, entry)
 
+        if not r_cfg.r_version:
+            logger.warning(
+                "r_version is not pinned in config. An unconstrained R "
+                "install pulls the latest conda-forge release, which may "
+                "not yet have all R packages rebuilt. Pin r_version to a "
+                "known-good release (e.g. r_version: '4.5.2') in your "
+                "YAML config to avoid package compatibility issues."
+            )
+
         return packages
 
     def get_pip_packages(self, config: ToolkitConfig) -> list[str]:
@@ -115,6 +124,11 @@ class RPlugin(LanguagePlugin):
             logger.info("    DuckDB step took %.0fs", elapsed)
 
         version = self._get_r_version(env_prefix)
+
+        age_warning = self._check_r_version_age(env_prefix)
+        if age_warning:
+            warnings.append(age_warning)
+            logger.warning("  %s", age_warning)
 
         return PluginResult(
             success=True, language="r",
@@ -339,6 +353,47 @@ class RPlugin(LanguagePlugin):
         run_cmd([r_bin, "--vanilla", "--quiet", "-e", r_code],
                 description="Verify DuckDB extensions")
         logger.info("    DuckDB installation complete")
+
+    def _check_r_version_age(self, env_prefix: str) -> str | None:
+        """Warn if the installed r-base conda package was built very recently.
+
+        conda-forge typically needs 2-4 weeks after a new R release to
+        rebuild all downstream R packages.  A freshly built r-base means
+        some packages may not yet be available at matching versions.
+        """
+        import json as _json
+        from datetime import datetime, timezone
+
+        meta_dir = os.path.join(env_prefix, "conda-meta")
+        if not os.path.isdir(meta_dir):
+            return None
+
+        for fname in os.listdir(meta_dir):
+            if not fname.startswith("r-base-") or not fname.endswith(".json"):
+                continue
+            try:
+                with open(os.path.join(meta_dir, fname)) as fh:
+                    meta = _json.load(fh)
+                ts = meta.get("timestamp")
+                if not ts:
+                    return None
+                build_date = datetime.fromtimestamp(ts / 1000, tz=timezone.utc)
+                age_days = (datetime.now(tz=timezone.utc) - build_date).days
+                version = meta.get("version", "unknown")
+                if age_days < 30:
+                    return (
+                        f"R {version} was built on conda-forge only "
+                        f"{age_days} day(s) ago. Some R packages may not "
+                        f"yet be rebuilt for this version. If you hit "
+                        f"dependency errors during model registration or "
+                        f"SPCS inference, pin an older R version in your "
+                        f"YAML config (e.g. r_version: '4.5.2')."
+                    )
+            except Exception:
+                pass
+            break
+
+        return None
 
     def _get_r_version(self, env_prefix: str) -> str:
         r_bin = os.path.join(env_prefix, "bin", "R")

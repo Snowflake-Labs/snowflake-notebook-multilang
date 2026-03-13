@@ -15,6 +15,12 @@ force_reinstall: false
 # ---------------------------------------------------------------------------
 # Languages
 # ---------------------------------------------------------------------------
+# IMPORTANT: r_version should always be pinned to a known-good conda-forge
+# release.  After a new R release, conda-forge needs 2-4 weeks to rebuild
+# all downstream R packages.  An unconstrained install may pull a version
+# whose packages are not yet available, causing SPCS inference failures.
+# The installer warns if the installed R build is < 30 days old.
+# ---------------------------------------------------------------------------
 languages:
   r:
     enabled: true
