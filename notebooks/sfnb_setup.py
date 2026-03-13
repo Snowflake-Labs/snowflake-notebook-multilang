@@ -93,5 +93,8 @@ def install_r(**kwargs):
     """
     kwargs.setdefault("languages", ["r"])
     install(**kwargs)
-    from r_helpers import setup_r_environment
+    try:
+        from sfnb_multilang.helpers.r_helpers import setup_r_environment
+    except ImportError:
+        from r_helpers import setup_r_environment
     setup_r_environment()

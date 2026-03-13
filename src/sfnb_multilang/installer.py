@@ -99,7 +99,13 @@ class Installer:
             logger.info("Phase 0: Network rule configuration")
             eai_result = self._apply_network_rules(report)
             if not eai_result.success:
-                return report
+                if self._has_network_access():
+                    logger.info(
+                        "  EAI auto-setup failed, but network access is "
+                        "available (existing EAI detected). Continuing..."
+                    )
+                else:
+                    return report
 
         # Phase 1: Preflight
         logger.info("Phase 1: Preflight checks")
@@ -252,6 +258,22 @@ class Installer:
         if not session:
             return self._export_sql_fallback(sql, nr_config, "No active Snowpark session")
 
+        # Network rules are schema-level objects -- a database context is
+        # required.  Check early and give a clear message instead of a
+        # cryptic SQL compilation error.
+        try:
+            db_result = session.sql("SELECT CURRENT_DATABASE()").collect()
+            current_db = db_result[0][0] if db_result else None
+            if not current_db:
+                return self._export_sql_fallback(
+                    sql, nr_config,
+                    "No database context set. Run 'USE DATABASE <name>' "
+                    "before install(), or set apply_eai=False if you "
+                    "already have an External Access Integration enabled.",
+                )
+        except Exception:
+            pass
+
         statements = [
             s.strip() for s in sql.split(";")
             if s.strip() and not s.strip().startswith("--")
@@ -329,6 +351,19 @@ class Installer:
             return get_active_session()
         except Exception:
             return None
+
+    def _has_network_access(self) -> bool:
+        """Quick connectivity check to conda-forge (the critical host)."""
+        import urllib.request
+        try:
+            req = urllib.request.Request(
+                "https://conda.anaconda.org/conda-forge/noarch/repodata.json.bz2",
+                method="HEAD",
+            )
+            urllib.request.urlopen(req, timeout=5)
+            return True
+        except Exception:
+            return False
 
     # -----------------------------------------------------------------
     # Helper deployment
