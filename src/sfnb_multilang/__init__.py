@@ -9,6 +9,10 @@ Quick start::
 
 For EAI setup::
 
+    from sfnb_multilang import ensure_eai
+    ensure_eai(session, config="my_config.yaml")
+
+    # Or the older CREATE OR REPLACE approach:
     from sfnb_multilang import apply_eai, generate_eai_sql
     apply_eai(session, languages=["r", "scala"])
 """
@@ -101,3 +105,39 @@ def apply_eai(
         cfg = apply_cli_overrides(cfg, languages=languages)
 
     return _apply_eai(session, config=cfg, account=account, **kwargs)
+
+
+def ensure_eai(
+    session,
+    config: str | None = None,
+    eai_name: str | None = None,
+    rule_name: str | None = None,
+    account: str = "",
+    languages: list[str] | None = None,
+    **kwargs,
+) -> dict:
+    """Ensure the EAI has all domains required by the configured languages.
+
+    Introspects an existing EAI and merges in any missing domains.
+    Creates the EAI if it doesn't exist.  Falls back to printing SQL
+    if the caller lacks privileges.
+
+    Returns a dict with ``action``, ``eai_name``, ``rule_name``,
+    ``domains_added``, and ``sql``.
+    """
+    from .config import ToolkitConfig, apply_cli_overrides, load_config
+    from .network_rules import ensure_eai as _ensure_eai
+
+    if config:
+        cfg = load_config(config)
+    else:
+        cfg = ToolkitConfig()
+
+    if languages:
+        cfg = apply_cli_overrides(cfg, languages=languages, **kwargs)
+
+    return _ensure_eai(
+        session, config=cfg, eai_name=eai_name,
+        rule_name=rule_name, account=account,
+        grant_to_role=kwargs.get("grant_to_role"),
+    )

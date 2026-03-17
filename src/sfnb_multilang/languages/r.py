@@ -64,6 +64,14 @@ class RPlugin(LanguagePlugin):
                 "purpose": "CRAN package downloads", "required": True,
             })
 
+        # pak always checks Bioconductor config during init, even for
+        # GitHub-only installs
+        hosts.append({
+            "host": "bioconductor.org", "port": 443,
+            "purpose": "Bioconductor config (pak initialization)",
+            "required": True,
+        })
+
         if r_cfg.addons.get("adbc"):
             hosts.extend([
                 {"host": "community.r-multiverse.org", "port": 443,

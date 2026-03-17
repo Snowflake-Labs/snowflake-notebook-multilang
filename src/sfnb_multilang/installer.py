@@ -274,10 +274,19 @@ class Installer:
         except Exception:
             pass
 
-        statements = [
-            s.strip() for s in sql.split(";")
-            if s.strip() and not s.strip().startswith("--")
-        ]
+        statements = []
+        for s in sql.split(";"):
+            stripped = s.strip()
+            if not stripped:
+                continue
+            # Strip leading comment lines -- a statement like
+            # "-- comment\nCREATE ..." is valid SQL, not a comment-only block.
+            body = "\n".join(
+                ln for ln in stripped.splitlines()
+                if not ln.lstrip().startswith("--")
+            ).strip()
+            if body:
+                statements.append(stripped)
 
         try:
             for stmt in statements:
@@ -315,28 +324,61 @@ class Installer:
             raise NetworkRuleError(f"Unexpected error applying EAI: {error_msg}") from exc
 
     def _export_sql_fallback(self, sql: str, nr_config, reason: str) -> EaiResult:
-        """Write SQL to file and print instructions when execution fails."""
-        export_path = nr_config.sql_export_path or "./eai_setup.sql"
-        abs_path = os.path.abspath(export_path)
+        """Write SQL to file and print instructions when execution fails.
 
-        with open(abs_path, "w") as f:
-            f.write(sql)
+        Workspace Notebooks may have a read-only working directory, so we
+        try several locations before falling back to stdout-only output.
+        """
+        import tempfile
+
+        export_path = nr_config.sql_export_path or "./eai_setup.sql"
+        abs_path: str | None = None
+
+        candidates = [
+            os.path.abspath(export_path),
+            os.path.join(tempfile.gettempdir(), "eai_setup.sql"),
+        ]
+        for path in candidates:
+            try:
+                os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+                with open(path, "w") as f:
+                    f.write(sql)
+                abs_path = path
+                break
+            except OSError:
+                continue
 
         sep = "=" * 70
-        logger.warning(
-            "\n%s\n  NETWORK RULE SETUP REQUIRED\n%s\n\n"
-            "  Reason: %s\n\n"
-            "  The installer needs external network access but could not\n"
-            "  create the required network rule automatically.\n\n"
-            "  What to do:\n"
-            "  1. Share the file below with your Snowflake administrator\n"
-            "  2. They should execute the SQL in a worksheet with ACCOUNTADMIN\n"
-            "  3. Enable '%s' on your notebook\n"
-            "     via Snowsight > Notebook settings > External access\n"
-            "  4. Re-run the installer\n\n"
-            "  SQL file saved to: %s\n%s",
-            sep, sep, reason, nr_config.integration_name, abs_path, sep,
-        )
+        if abs_path:
+            logger.warning(
+                "\n%s\n  NETWORK RULE SETUP REQUIRED\n%s\n\n"
+                "  Reason: %s\n\n"
+                "  The installer needs external network access but could not\n"
+                "  create the required network rule automatically.\n\n"
+                "  What to do:\n"
+                "  1. Share the file below with your Snowflake administrator\n"
+                "  2. They should execute the SQL in a worksheet with ACCOUNTADMIN\n"
+                "  3. Enable '%s' on your notebook\n"
+                "     via Snowsight > Notebook settings > External access\n"
+                "  4. Re-run the installer\n\n"
+                "  SQL file saved to: %s\n%s",
+                sep, sep, reason, nr_config.integration_name, abs_path, sep,
+            )
+        else:
+            logger.warning(
+                "\n%s\n  NETWORK RULE SETUP REQUIRED\n%s\n\n"
+                "  Reason: %s\n\n"
+                "  The installer needs external network access but could not\n"
+                "  create the required network rule automatically.\n"
+                "  (Could not write SQL file -- read-only file system.)\n\n"
+                "  What to do:\n"
+                "  1. Copy the SQL printed below and share with your Snowflake administrator\n"
+                "  2. They should execute the SQL in a worksheet with ACCOUNTADMIN\n"
+                "  3. Enable '%s' on your notebook\n"
+                "     via Snowsight > Notebook settings > External access\n"
+                "  4. Re-run the installer\n%s",
+                sep, sep, reason, nr_config.integration_name, sep,
+            )
         print(sql)
         logger.warning(
             "%s\n  Installation halted. Re-run after network access is configured.\n%s",

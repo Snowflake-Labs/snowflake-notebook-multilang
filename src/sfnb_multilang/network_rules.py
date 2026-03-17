@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 from datetime import datetime, timezone
@@ -31,6 +32,71 @@ SHARED_HOSTS = [
      "required": True, "category": "shared"},
 ]
 
+# Hosts required by the toolkit itself (pip install from GitHub/PyPI,
+# pak-based R package installs from GitHub repos)
+TOOLKIT_HOSTS = [
+    {"host": "pypi.org", "port": 443,
+     "purpose": "PyPI index (sfnb-multilang, rpy2, tabulate)",
+     "required": True, "category": "toolkit"},
+    {"host": "files.pythonhosted.org", "port": 443,
+     "purpose": "PyPI file downloads",
+     "required": True, "category": "toolkit"},
+    {"host": "github.com", "port": 443,
+     "purpose": "GitHub repos (sfnb-multilang, pak, language packages)",
+     "required": True, "category": "toolkit"},
+    {"host": "api.github.com", "port": 443,
+     "purpose": "GitHub API (pak dependency resolution)",
+     "required": True, "category": "toolkit"},
+    {"host": "codeload.github.com", "port": 443,
+     "purpose": "GitHub source archives",
+     "required": True, "category": "toolkit"},
+    {"host": "objects.githubusercontent.com", "port": 443,
+     "purpose": "GitHub raw content / release assets",
+     "required": True, "category": "toolkit"},
+]
+
+
+def _collect_required_hosts(
+    config: ToolkitConfig,
+    account: str = "",
+) -> list[dict]:
+    """Collect all required hosts from shared + toolkit + enabled plugins.
+
+    Returns deduplicated list of host dicts sorted by category then hostname.
+    """
+    plugins = get_enabled_plugins(config)
+    all_hosts = list(SHARED_HOSTS) + list(TOOLKIT_HOSTS)
+
+    for plugin in plugins:
+        plugin_hosts = plugin.get_network_hosts(config)
+        for h in plugin_hosts:
+            h.setdefault("category", plugin.name)
+        all_hosts.extend(plugin_hosts)
+
+    acct = account or config.network_rule.account
+    if acct:
+        all_hosts.append({
+            "host": f"{acct}.snowflakecomputing.com",
+            "port": 443,
+            "purpose": "Snowflake account public endpoint",
+            "required": True,
+            "category": "snowflake",
+        })
+
+    seen: set[str] = set()
+    unique: list[dict] = []
+    for h in all_hosts:
+        if h["host"] not in seen:
+            seen.add(h["host"])
+            unique.append(h)
+
+    category_order = {"shared": 0, "toolkit": 1, "snowflake": 2}
+    unique.sort(key=lambda h: (
+        category_order.get(h.get("category", "plugin"), 3),
+        h["host"],
+    ))
+    return unique
+
 
 def generate_network_rule_sql(
     config: ToolkitConfig | str,
@@ -46,42 +112,8 @@ def generate_network_rule_sql(
     if isinstance(config, str):
         config = load_config(config)
 
+    unique_hosts = _collect_required_hosts(config, account=account)
     plugins = get_enabled_plugins(config)
-
-    # Collect all hosts
-    all_hosts = list(SHARED_HOSTS)
-
-    for plugin in plugins:
-        plugin_hosts = plugin.get_network_hosts(config)
-        for h in plugin_hosts:
-            h.setdefault("category", plugin.name)
-        all_hosts.extend(plugin_hosts)
-
-    # Account-specific host
-    account = account or config.network_rule.account
-    if account:
-        all_hosts.append({
-            "host": f"{account}.snowflakecomputing.com",
-            "port": 443,
-            "purpose": "Snowflake account public endpoint",
-            "required": True,
-            "category": "snowflake",
-        })
-
-    # Deduplicate by host
-    seen: set[str] = set()
-    unique_hosts: list[dict] = []
-    for h in all_hosts:
-        if h["host"] not in seen:
-            seen.add(h["host"])
-            unique_hosts.append(h)
-
-    # Sort: shared first, then snowflake, then by plugin
-    category_order = {"shared": 0, "snowflake": 1}
-    unique_hosts.sort(key=lambda h: (
-        category_order.get(h.get("category", "plugin"), 2),
-        h["host"],
-    ))
 
     # Build SQL
     host_lines: list[str] = []
@@ -221,3 +253,314 @@ def get_stage_hosts(session) -> list[str]:
         WHERE t.value:type::VARCHAR = 'STAGE'
     """).collect()
     return [row[0] for row in result]
+
+
+# ---------------------------------------------------------------------------
+# EAI introspection and dynamic management
+# ---------------------------------------------------------------------------
+
+def _parse_host_list(raw: str) -> set[str]:
+    """Parse a VALUE_LIST string into a set of domain names.
+
+    Handles formats returned by DESCRIBE NETWORK RULE:
+      ``"host1:443,host2:443"``  ``"'host1','host2'"``  ``"host1, host2"``
+    """
+    if not raw:
+        return set()
+    domains: set[str] = set()
+    for part in raw.replace("\n", ",").split(","):
+        part = part.strip().strip("'\"()[] ")
+        if ":" in part:
+            part = part.rsplit(":", 1)[0]
+        if "." in part and part:
+            domains.add(part.lower())
+    return domains
+
+
+def _eai_exists(session, eai_name: str) -> bool:
+    """Check whether an External Access Integration exists."""
+    try:
+        rows = session.sql(
+            f"SHOW EXTERNAL ACCESS INTEGRATIONS LIKE '{eai_name}'"
+        ).collect()
+        return len(rows) > 0
+    except Exception:
+        return False
+
+
+def _get_eai_rule_names(session, eai_name: str) -> list[str]:
+    """Discover network rule names referenced by an existing EAI."""
+    try:
+        rows = session.sql(
+            f"DESCRIBE EXTERNAL ACCESS INTEGRATION {eai_name}"
+        ).collect()
+        for row in rows:
+            try:
+                d = row.as_dict()
+            except Exception:
+                continue
+            prop = ""
+            for key in ("name", "property", "PROPERTY"):
+                v = str(d.get(key, "")).upper()
+                if v:
+                    prop = v
+                    break
+            if "ALLOWED_NETWORK_RULES" in prop:
+                val = str(
+                    d.get("value", d.get("property_value",
+                           d.get("VALUE", d.get("PROPERTY_VALUE", ""))))
+                )
+                return [
+                    r.strip().strip("[]'\"")
+                    for r in val.split(",")
+                    if r.strip().strip("[]'\"")
+                ]
+    except Exception:
+        pass
+    return []
+
+
+def _get_rule_domains(session, rule_name: str) -> set[str]:
+    """Get the current domain set from an existing network rule."""
+    try:
+        rows = session.sql(f"DESCRIBE NETWORK RULE {rule_name}").collect()
+        for row in rows:
+            try:
+                d = row.as_dict()
+            except Exception:
+                continue
+            prop = ""
+            for key in ("name", "property", "PROPERTY"):
+                v = str(d.get(key, "")).upper()
+                if v:
+                    prop = v
+                    break
+            if "VALUE" in prop and ("LIST" in prop or "HOST" in prop):
+                raw = str(
+                    d.get("value", d.get("property_value",
+                           d.get("VALUE", d.get("PROPERTY_VALUE", ""))))
+                )
+                return _parse_host_list(raw)
+    except Exception:
+        pass
+    return set()
+
+
+def _print_attach_instructions(eai_name: str) -> None:
+    """Print Snowsight UI instructions for first-time EAI attachment."""
+    print(
+        f"\n  Attach '{eai_name}' to your notebook service:\n"
+        f"    1. Click 'Connected' (top-left toolbar)\n"
+        f"    2. Hover over service name > Edit\n"
+        f"    3. Scroll to External Access\n"
+        f"    4. Toggle ON '{eai_name}' > Save\n"
+        f"    5. Service restarts automatically\n"
+        f"    6. Run from Section 1\n"
+    )
+
+
+def _get_attached_eais(
+    settings_path: str = "",
+) -> list[str]:
+    """Read EAIs attached to this notebook service from settings.
+
+    Workspace Notebooks expose the current service configuration in
+    ``.snowflake/settings.json`` (written by the control plane at
+    service startup; local writes are overwritten on restart).
+
+    Returns a list of EAI names (upper-cased), or empty list if the
+    file is missing or unreadable.
+    """
+    if not settings_path:
+        settings_path = os.path.join(
+            os.getcwd(), ".snowflake", "settings.json",
+        )
+    try:
+        with open(settings_path) as f:
+            data = json.load(f)
+        svc = (
+            data
+            .get("notebookSettings", {})
+            .get("serviceDefaults", {})
+        )
+        raw = svc.get("externalAccessIntegrations", [])
+        return [name.upper() for name in raw if name]
+    except Exception:
+        return []
+
+
+def ensure_eai(
+    session,
+    config: ToolkitConfig | str | None = None,
+    eai_name: str | None = None,
+    rule_name: str | None = None,
+    account: str = "",
+    grant_to_role: str | None = None,
+) -> dict:
+    """Ensure the EAI has all domains required by the configured languages.
+
+    Resolution order for names:
+      1. Explicit parameters (*eai_name*, *rule_name*)
+      2. Config values (``network_rule.integration_name``, ``.rule_name``)
+
+    If the EAI already exists its network rule is introspected and any
+    missing domains are merged in via ``ALTER NETWORK RULE``.  If the EAI
+    does not exist it is created via ``CREATE``.
+
+    On permission failure the complete SQL is printed for an admin.
+
+    Returns
+    -------
+    dict
+        ``eai_name``, ``rule_name``, ``action``, ``domains_added``, ``sql``
+
+        ``action`` is one of ``"updated"``, ``"created"``,
+        ``"no_change"``, ``"print_sql"``
+    """
+    if isinstance(config, str):
+        config = load_config(config)
+    elif config is None:
+        config = ToolkitConfig()
+
+    resolved_eai = eai_name or config.network_rule.integration_name
+    resolved_rule = rule_name or config.network_rule.rule_name
+
+    if not account:
+        try:
+            result = session.sql("SELECT CURRENT_ACCOUNT()").collect()
+            account = result[0][0]
+        except Exception:
+            pass
+
+    required_hosts = _collect_required_hosts(config, account=account)
+    required_domains = {h["host"].lower() for h in required_hosts}
+
+    # ----- Check service attachment via .snowflake/settings.json -----
+    attached = _get_attached_eais()
+    is_attached = resolved_eai.upper() in attached
+
+    result = {
+        "eai_name": resolved_eai,
+        "rule_name": resolved_rule,
+        "action": "no_change",
+        "attached": is_attached,
+        "domains_added": [],
+        "sql": "",
+    }
+
+    if is_attached:
+        logger.info("EAI '%s' is attached to this service.", resolved_eai)
+    elif attached:
+        logger.info(
+            "Service has EAI(s) %s but not '%s'.",
+            attached, resolved_eai,
+        )
+
+    role = grant_to_role
+    if not role:
+        try:
+            role = (session.get_current_role() or "").replace('"', '')
+        except Exception:
+            pass
+
+    # ----- EAI already exists: introspect and merge -----
+    if _eai_exists(session, resolved_eai):
+        eai_rules = _get_eai_rule_names(session, resolved_eai)
+        actual_rule = eai_rules[0] if eai_rules else resolved_rule
+
+        current_domains = _get_rule_domains(session, actual_rule)
+        missing = required_domains - current_domains
+
+        if not missing:
+            msg = (
+                f"EAI '{resolved_eai}' already has all "
+                f"{len(required_domains)} required domains."
+            )
+            logger.info(msg)
+            print(msg)
+            if is_attached:
+                print("Ready.")
+            else:
+                _print_attach_instructions(resolved_eai)
+            return result
+
+        merged = sorted(current_domains | required_domains)
+        host_list = ", ".join(f"'{h}'" for h in merged)
+        alter_sql = (
+            f"ALTER NETWORK RULE {actual_rule} "
+            f"SET VALUE_LIST = ({host_list})"
+        )
+
+        try:
+            session.sql(alter_sql).collect()
+            added = sorted(missing)
+            msg = (
+                f"Updated '{actual_rule}': added {len(added)} domain(s)."
+            )
+            logger.info(msg)
+            print(msg)
+            logger.info("Added: %s", ", ".join(added))
+            if is_attached:
+                print("  Changes take effect immediately. Ready.")
+            else:
+                _print_attach_instructions(resolved_eai)
+            result["action"] = "updated"
+            result["rule_name"] = actual_rule
+            result["domains_added"] = added
+            result["sql"] = alter_sql
+            return result
+        except Exception as exc:
+            logger.warning(
+                "ALTER failed (insufficient privileges?): %s", exc,
+            )
+
+    # ----- EAI does not exist or ALTER failed: try CREATE -----
+    create_sql = generate_network_rule_sql(
+        config, account=account,
+        rule_name=resolved_rule, integration_name=resolved_eai,
+    )
+    if role:
+        create_sql += (
+            f"\nGRANT USAGE ON INTEGRATION {resolved_eai} "
+            f"TO ROLE {role};\n"
+        )
+
+    if not _eai_exists(session, resolved_eai):
+        try:
+            statements = [
+                s.strip() for s in create_sql.split(";")
+                if s.strip() and not s.strip().startswith("--")
+            ]
+            for stmt in statements:
+                logger.info("Executing: %s...", stmt[:80])
+                session.sql(stmt).collect()
+
+            msg = (
+                f"Created EAI '{resolved_eai}' with "
+                f"network rule '{resolved_rule}'."
+            )
+            logger.info(msg)
+            print(msg)
+            result["action"] = "created"
+            result["domains_added"] = sorted(required_domains)
+            result["sql"] = create_sql
+            if not is_attached:
+                _print_attach_instructions(resolved_eai)
+            else:
+                print("Ready.")
+            return result
+        except Exception as exc:
+            logger.warning("CREATE failed: %s", exc)
+
+    # ----- Permission denied: print SQL for admin -----
+    print(
+        "\nCould not create or modify EAI "
+        "(insufficient privileges)."
+    )
+    print("Share this SQL with your Snowflake admin:\n")
+    print(create_sql)
+    if not is_attached:
+        _print_attach_instructions(resolved_eai)
+    result["action"] = "print_sql"
+    result["sql"] = create_sql
+    return result
