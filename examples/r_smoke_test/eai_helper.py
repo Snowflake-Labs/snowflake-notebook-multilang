@@ -222,14 +222,47 @@ def _get_rule_domains(session, rule_name: str) -> set[str]:
 
 # ── Service settings introspection ───────────────────────────────────────
 
-SETTINGS_PATH = os.path.join(
-    os.getcwd(), ".snowflake", "settings.json"
-)
+
+def _find_settings_json() -> str | None:
+    """Locate .snowflake/settings.json by searching likely paths.
+
+    Workspace Notebooks may have a different CWD than the notebook file
+    directory, so we check multiple locations.
+    """
+    candidates = [
+        os.path.join(os.getcwd(), ".snowflake", "settings.json"),
+    ]
+    # Walk up from CWD (max 5 levels)
+    d = os.getcwd()
+    for _ in range(5):
+        p = os.path.join(d, ".snowflake", "settings.json")
+        if p not in candidates:
+            candidates.append(p)
+        parent = os.path.dirname(d)
+        if parent == d:
+            break
+        d = parent
+    # Also check /home/jupyter and common Workspace roots
+    for root in ("/home/jupyter", "/home"):
+        p = os.path.join(root, ".snowflake", "settings.json")
+        if p not in candidates:
+            candidates.append(p)
+    # Scan /filesystem/ mounts (Workspace notebook files live there)
+    try:
+        for entry in os.listdir("/filesystem"):
+            p = os.path.join("/filesystem", entry, ".snowflake", "settings.json")
+            if p not in candidates:
+                candidates.append(p)
+    except OSError:
+        pass
+
+    for path in candidates:
+        if os.path.isfile(path):
+            return path
+    return None
 
 
-def _get_attached_eais(
-    settings_path: str = SETTINGS_PATH,
-) -> list[str]:
+def _get_attached_eais() -> list[str]:
     """Read EAIs attached to this notebook service.
 
     Workspace Notebooks expose the current service configuration in
@@ -240,6 +273,9 @@ def _get_attached_eais(
     Returns a list of EAI names (upper-cased for comparison), or an
     empty list if the file is missing or unreadable.
     """
+    settings_path = _find_settings_json()
+    if not settings_path:
+        return []
     try:
         with open(settings_path) as f:
             data = json.load(f)
@@ -321,6 +357,20 @@ def ensure_eai(
     attached = _get_attached_eais()
     is_attached = resolved_eai.upper() in attached
 
+    # If the configured EAI isn't attached but another one is, use it
+    if not is_attached and attached:
+        alt = attached[0]
+        print(
+            f"Configured EAI '{resolved_eai}' is not attached, "
+            f"but found attached EAI '{alt}' -- using that instead."
+        )
+        resolved_eai = alt
+        is_attached = True
+        # Discover the rule name from the attached EAI
+        alt_rules = _get_eai_rule_names(session, resolved_eai)
+        if alt_rules:
+            resolved_rule = alt_rules[0]
+
     result = {
         "eai_name": resolved_eai,
         "rule_name": resolved_rule,
@@ -331,13 +381,8 @@ def ensure_eai(
 
     if is_attached:
         print(f"EAI '{resolved_eai}' is attached to this service.")
-    elif attached:
-        print(
-            f"Service has EAI(s) {attached} but not "
-            f"'{resolved_eai}'."
-        )
     else:
-        print("No EAIs attached to this service yet.")
+        print("No EAIs detected on this service.")
 
     # -- EAI already exists: introspect and merge --------------------------
     if _eai_exists(session, resolved_eai):

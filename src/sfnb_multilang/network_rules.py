@@ -414,9 +414,38 @@ def _print_final_state(rule_name, domains) -> None:
     )
 
 
-def _get_attached_eais(
-    settings_path: str = "",
-) -> list[str]:
+def _find_settings_json() -> str | None:
+    """Locate .snowflake/settings.json by searching likely paths."""
+    candidates = [
+        os.path.join(os.getcwd(), ".snowflake", "settings.json"),
+    ]
+    d = os.getcwd()
+    for _ in range(5):
+        p = os.path.join(d, ".snowflake", "settings.json")
+        if p not in candidates:
+            candidates.append(p)
+        parent = os.path.dirname(d)
+        if parent == d:
+            break
+        d = parent
+    for root in ("/home/jupyter", "/home"):
+        p = os.path.join(root, ".snowflake", "settings.json")
+        if p not in candidates:
+            candidates.append(p)
+    try:
+        for entry in os.listdir("/filesystem"):
+            p = os.path.join("/filesystem", entry, ".snowflake", "settings.json")
+            if p not in candidates:
+                candidates.append(p)
+    except OSError:
+        pass
+    for path in candidates:
+        if os.path.isfile(path):
+            return path
+    return None
+
+
+def _get_attached_eais() -> list[str]:
     """Read EAIs attached to this notebook service from settings.
 
     Workspace Notebooks expose the current service configuration in
@@ -426,10 +455,9 @@ def _get_attached_eais(
     Returns a list of EAI names (upper-cased), or empty list if the
     file is missing or unreadable.
     """
+    settings_path = _find_settings_json()
     if not settings_path:
-        settings_path = os.path.join(
-            os.getcwd(), ".snowflake", "settings.json",
-        )
+        return []
     try:
         with open(settings_path) as f:
             data = json.load(f)
@@ -494,6 +522,18 @@ def ensure_eai(
     attached = _get_attached_eais()
     is_attached = resolved_eai.upper() in attached
 
+    if not is_attached and attached:
+        alt = attached[0]
+        logger.info(
+            "Configured EAI '%s' not attached; using attached EAI '%s'.",
+            resolved_eai, alt,
+        )
+        resolved_eai = alt
+        is_attached = True
+        alt_rules = _get_eai_rule_names(session, resolved_eai)
+        if alt_rules:
+            resolved_rule = alt_rules[0]
+
     result = {
         "eai_name": resolved_eai,
         "rule_name": resolved_rule,
@@ -505,11 +545,6 @@ def ensure_eai(
 
     if is_attached:
         logger.info("EAI '%s' is attached to this service.", resolved_eai)
-    elif attached:
-        logger.info(
-            "Service has EAI(s) %s but not '%s'.",
-            attached, resolved_eai,
-        )
 
     role = grant_to_role
     if not role:
