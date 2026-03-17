@@ -324,24 +324,41 @@ def ensure_eai(
     )
 
     # -- Set session context -----------------------------------------------
-    ctx = nb_cfg.get("context", {})
+    # Use session's existing context as defaults; notebook_config overrides.
+    ctx = nb_cfg.get("context", {}) or {}
+    _strip = lambda s: (s or "").replace('"', '')
+    session_defaults = {
+        "warehouse": _strip(session.get_current_warehouse()),
+        "database": _strip(session.get_current_database()),
+        "schema": _strip(session.get_current_schema()),
+    }
     for key, cmd in [
         ("warehouse", "USE WAREHOUSE"),
         ("database", "USE DATABASE"),
         ("schema", "USE SCHEMA"),
     ]:
-        val = ctx.get(key, "")
-        if val and not val.startswith("<"):
+        cfg_val = ctx.get(key, "")
+        if cfg_val and not cfg_val.startswith("<"):
             try:
-                session.sql(f"{cmd} {val}").collect()
+                session.sql(f"{cmd} {cfg_val}").collect()
             except Exception:
                 pass
+        elif not session_defaults.get(key):
+            pass  # no override and no session default -- skip
 
+    # Re-read the effective context after any USE statements
+    effective = {
+        "warehouse": _strip(session.get_current_warehouse()) or "?",
+        "database": _strip(session.get_current_database()) or "?",
+        "schema": _strip(session.get_current_schema()) or "?",
+    }
     context_str = (
-        f"{ctx.get('database', '?')}.{ctx.get('schema', '?')} "
-        f"(warehouse: {ctx.get('warehouse', '?')})"
+        f"{effective['database']}.{effective['schema']} "
+        f"(warehouse: {effective['warehouse']})"
     )
     print(f"Session context: {context_str}")
+    if not ctx:
+        print("  (using session defaults -- no notebook_config overrides)")
 
     # -- Derive required domains from language config ----------------------
     lang_path = os.path.join(os.getcwd(), lang_config)

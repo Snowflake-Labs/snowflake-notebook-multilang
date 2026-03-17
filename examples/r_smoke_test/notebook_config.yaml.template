@@ -1,24 +1,30 @@
 # =============================================================================
 # R Smoke Test -- Notebook Configuration
 # =============================================================================
-# Copy this file to notebook_config.yaml and set your values.
+# Copy this file to notebook_config.yaml and edit as needed.
 #
 # Usage:
 #   cp notebook_config.yaml.template notebook_config.yaml
 #   # Edit notebook_config.yaml with your values
+#
+# NOTE: The context section is OPTIONAL. If omitted, the script uses
+# whatever database/schema/warehouse the session already has (e.g. from
+# the Snowsight UI or prior SQL cells). Only set values here if you
+# need to override the session defaults.
 # =============================================================================
 
-context:
-  warehouse: "<YOUR_WAREHOUSE>"
-  database: "<YOUR_DATABASE>"
-  schema: "<YOUR_SCHEMA>"
-  # role: "<YOUR_ROLE>"   # Optional: uncomment to set a role
+# context:                              # Optional -- uncomment to override
+#   warehouse: "<YOUR_WAREHOUSE>"
+#   database: "<YOUR_DATABASE>"
+#   schema: "<YOUR_SCHEMA>"
+#   role: "<YOUR_ROLE>"
 
 # EAI (External Access Integration) -- optional
 # If your admin has already created an EAI and attached it to
 # your notebook service, specify its name here so Section 0 can
 # introspect it and add any missing domains automatically.
-# If omitted, Section 0 uses the convention name "multilang_notebook_eai".
+# If omitted, Section 0 auto-detects attached EAIs from the service
+# settings, or falls back to the convention name "multilang_notebook_eai".
 # eai:
 #   name: "<YOUR_EAI_NAME>"
 #   network_rule: "<YOUR_NETWORK_RULE_NAME>"
