@@ -43,6 +43,9 @@ for the configured languages.
 - **No privileges to create/alter?** Section 0 prints the complete SQL for
   your admin.
 
+Once created and attached, the same EAI can be reused across multiple
+Workspace Notebooks -- it is a one-time setup per service.
+
 **EAI name resolution:** Section 0 checks `notebook_config.yaml` for an
 explicit `eai.name`, then falls back to the convention name
 `multilang_notebook_eai`.
@@ -92,17 +95,17 @@ RSnowflake uses the Snowflake SQL API v2. In Workspace Notebooks the built-in
 SPCS OAuth token (`/snowflake/session/token`) is used automatically -- no
 Programmatic Access Token (PAT) is required.
 
-### Faster R Package Installation (optional)
+### R Package Installation Options
 
-By default, `snowflakeR` and `RSnowflake` are installed from GitHub via `pak`,
-which takes ~2 minutes on a fresh container. For faster installs, upload the
-pre-built tarballs to your Workspace alongside the notebook:
+Two install methods are supported. The notebook auto-detects which to use:
 
-- `snowflakeR_*.tar.gz`
-- `RSnowflake_*.tar.gz`
+| Method | What you do | First run | Cached |
+|--------|-------------|-----------|--------|
+| **Local tarball** (recommended) | Upload `.tar.gz` files to Workspace | ~10 sec | ~10 sec |
+| **GitHub via pak** (default) | Nothing -- downloads automatically | ~2 min | ~10 sec |
 
-When both tarballs are present the notebook installs from them directly
-(~10 seconds), skipping the GitHub download entirely.
+The tarball path is ~12x faster on a clean container (no network download,
+no `pak` bootstrap, no bioconductor.org dependency).
 
 **Where to get the tarballs:** Download from GitHub Releases:
 
@@ -116,6 +119,11 @@ gh release download --repo Snowflake-Labs/snowflakeR --pattern "*.tar.gz"
 gh release download --repo Snowflake-Labs/RSnowflake --pattern "*.tar.gz"
 ```
 
+Upload the `.tar.gz` files anywhere in your Workspace -- the notebook
+searches recursively including subfolders. If multiple versions are found,
+the newest is installed. You can also pin specific paths in
+`r_smoke_test_config.yaml` under the `tarballs` section.
+
 ### Database & Schema
 
 The test reads from `CURRENT_TIMESTAMP()` and optionally writes a small test
@@ -123,13 +131,13 @@ table. Any database/schema with CREATE TABLE privilege works.
 
 ## Expected Runtime
 
-| Step | First run | Cached |
-|------|-----------|--------|
-| EAI setup (Section 0) | ~5 sec | skip |
-| Bootstrap R environment | ~3 min | ~2 sec |
-| Install snowflakeR + RSnowflake | ~2 min | ~10 sec |
-| Run all tests | ~30 sec | ~30 sec |
-| **Total** | **~5.5 min** | **~45 sec** |
+| Step | First run (tarball) | First run (GitHub) | Cached |
+|------|--------------------|--------------------|--------|
+| EAI setup (Section 0) | ~5 sec | ~5 sec | skip |
+| Bootstrap R environment | ~45 sec | ~45 sec | ~2 sec |
+| Install snowflakeR + RSnowflake | **~10 sec** | ~2 min | ~10 sec |
+| Run all tests | ~30 sec | ~30 sec | ~30 sec |
+| **Total** | **~1.5 min** | **~3.5 min** | **~45 sec** |
 
 ## Interpreting Results
 

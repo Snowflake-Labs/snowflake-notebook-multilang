@@ -39,3 +39,10 @@ languages:
 
   julia:
     enabled: false
+
+# Optional: pin specific tarball paths for snowflakeR and RSnowflake.
+# If set, the R install cell uses these instead of searching recursively.
+# Paths are relative to the Workspace root.
+# tarballs:
+#   snowflakeR: "snowflakeR_0.1.0.tar.gz"
+#   RSnowflake: "RSnowflake_0.2.0.tar.gz"
