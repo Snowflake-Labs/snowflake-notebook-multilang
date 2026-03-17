@@ -412,17 +412,44 @@ class Installer:
     # -----------------------------------------------------------------
 
     def _deploy_helpers(self) -> None:
-        """Copy helper modules to the notebook working directory."""
+        """Copy helper modules to a location importable by the notebook.
+
+        Workspace Notebooks may have a read-only working directory, so we
+        try cwd first, then fall back to a writable temp directory that we
+        add to sys.path.
+        """
+        import sys
+        import tempfile
+
         helpers_dir = Path(__file__).parent / "helpers"
+        modules_to_deploy = []
         for plugin in self.plugins:
             module_name = plugin.get_helper_module_name()
             src = helpers_dir / module_name
             if src.exists():
-                dst = Path.cwd() / module_name
-                shutil.copy2(src, dst)
-                logger.info("  Deployed %s to %s", module_name, dst)
+                modules_to_deploy.append((module_name, src))
             else:
                 logger.debug("  Helper not found: %s", src)
+
+        if not modules_to_deploy:
+            return
+
+        # Try cwd first; fall back to a writable temp directory
+        target_dir = Path.cwd()
+        try:
+            test_path = target_dir / ".sfnb_write_test"
+            test_path.touch()
+            test_path.unlink()
+        except OSError:
+            target_dir = Path(tempfile.mkdtemp(prefix="sfnb_helpers_"))
+            if str(target_dir) not in sys.path:
+                sys.path.insert(0, str(target_dir))
+            logger.info("  Working directory is read-only; using %s", target_dir)
+
+        for module_name, src in modules_to_deploy:
+            dst = target_dir / module_name
+            shutil.copy2(src, dst)
+            logger.info("  Deployed %s to %s", module_name, dst)
 
     # -----------------------------------------------------------------
     # Summary
