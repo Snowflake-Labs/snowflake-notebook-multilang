@@ -214,10 +214,17 @@ def apply_eai(
     if dry_run:
         return sql
 
-    statements = [
-        s.strip() for s in sql.split(";")
-        if s.strip() and not s.strip().startswith("--")
-    ]
+    statements = []
+    for s in sql.split(";"):
+        stripped = s.strip()
+        if not stripped:
+            continue
+        body = "\n".join(
+            ln for ln in stripped.splitlines()
+            if not ln.lstrip().startswith("--")
+        ).strip()
+        if body:
+            statements.append(stripped)
 
     try:
         for stmt in statements:
@@ -321,26 +328,55 @@ def _get_eai_rule_names(session, eai_name: str) -> list[str]:
 
 
 def _get_rule_domains(session, rule_name: str) -> set[str]:
-    """Get the current domain set from an existing network rule."""
+    """Get the current domain set from an existing network rule.
+
+    Tries multiple column-name conventions across Snowflake versions,
+    then falls back to scanning every string value for hostname patterns.
+    """
     try:
         rows = session.sql(f"DESCRIBE NETWORK RULE {rule_name}").collect()
         for row in rows:
             try:
                 d = row.as_dict()
             except Exception:
-                continue
-            prop = ""
-            for key in ("name", "property", "PROPERTY"):
-                v = str(d.get(key, "")).upper()
-                if v:
-                    prop = v
+                d = {str(i): row[i] for i in range(len(row))}
+
+            upper_d = {str(k).upper(): v for k, v in d.items()}
+
+            prop_name = ""
+            for k in ("NAME", "PROPERTY", "PROPERTY_NAME"):
+                if k in upper_d:
+                    prop_name = str(upper_d[k]).upper()
                     break
-            if "VALUE" in prop and ("LIST" in prop or "HOST" in prop):
-                raw = str(
-                    d.get("value", d.get("property_value",
-                           d.get("VALUE", d.get("PROPERTY_VALUE", ""))))
-                )
+
+            if not any(kw in prop_name for kw in (
+                "VALUE_LIST", "HOST_PORT", "VALUE",
+            )):
+                continue
+
+            raw = ""
+            for k in ("VALUE", "PROPERTY_VALUE", "PROPERTY_DEFAULT"):
+                if k in upper_d and upper_d[k]:
+                    candidate = str(upper_d[k])
+                    if "." in candidate:
+                        raw = candidate
+                        break
+
+            if raw:
                 return _parse_host_list(raw)
+
+        # Fallback: scan all values for comma-separated hostnames
+        for row in rows:
+            try:
+                d = row.as_dict()
+            except Exception:
+                d = {str(i): row[i] for i in range(len(row))}
+            for v in d.values():
+                s = str(v)
+                if s.count(".") >= 2 and ("," in s or "'" in s):
+                    parsed = _parse_host_list(s)
+                    if len(parsed) >= 2:
+                        return parsed
     except Exception:
         pass
     return set()
@@ -356,6 +392,22 @@ def _print_attach_instructions(eai_name: str) -> None:
         f"    4. Toggle ON '{eai_name}' > Save\n"
         f"    5. Service restarts automatically\n"
         f"    6. Run from Section 1\n"
+    )
+
+
+def _print_final_state(rule_name, domains) -> None:
+    """Print the full CREATE OR REPLACE statement reflecting current state."""
+    if isinstance(domains, set):
+        domains = sorted(domains)
+    host_lines = "\n".join(f"    '{h}'" for h in domains)
+    print(
+        f"\n  Current state ({len(domains)} domains):\n"
+        f"  ----------------------------------------\n"
+        f"  CREATE OR REPLACE NETWORK RULE {rule_name}\n"
+        f"    MODE = EGRESS\n"
+        f"    TYPE = HOST_PORT\n"
+        f"    VALUE_LIST = (\n{host_lines}\n    );\n"
+        f"  ----------------------------------------"
     )
 
 
@@ -471,15 +523,20 @@ def ensure_eai(
         current_domains = _get_rule_domains(session, actual_rule)
         missing = required_domains - current_domains
 
+        print(f"\nNetwork rule '{actual_rule}':")
+        print(f"  Current domains : {len(current_domains)}")
+        print(f"  Required domains: {len(required_domains)}")
+        print(f"  Missing         : {len(missing)}")
+
         if not missing:
-            msg = (
-                f"EAI '{resolved_eai}' already has all "
-                f"{len(required_domains)} required domains."
+            logger.info(
+                "EAI '%s' already has all %d required domains.",
+                resolved_eai, len(required_domains),
             )
-            logger.info(msg)
-            print(msg)
+            print(f"\n  All {len(required_domains)} required domains present.")
+            _print_final_state(actual_rule, current_domains)
             if is_attached:
-                print("Ready.")
+                print("\nReady.")
             else:
                 _print_attach_instructions(resolved_eai)
             return result
@@ -494,20 +551,22 @@ def ensure_eai(
         try:
             session.sql(alter_sql).collect()
             added = sorted(missing)
-            msg = (
-                f"Updated '{actual_rule}': added {len(added)} domain(s)."
+            logger.info(
+                "Updated '%s': added %d domain(s): %s",
+                actual_rule, len(added), ", ".join(added),
             )
-            logger.info(msg)
-            print(msg)
-            logger.info("Added: %s", ", ".join(added))
-            if is_attached:
-                print("  Changes take effect immediately. Ready.")
-            else:
-                _print_attach_instructions(resolved_eai)
+            print(f"\n  Added {len(added)} domain(s):")
+            for d in added:
+                print(f"    + {d}")
             result["action"] = "updated"
             result["rule_name"] = actual_rule
             result["domains_added"] = added
             result["sql"] = alter_sql
+            _print_final_state(actual_rule, merged)
+            if is_attached:
+                print("\nChanges take effect immediately. Ready.")
+            else:
+                _print_attach_instructions(resolved_eai)
             return result
         except Exception as exc:
             logger.warning(
@@ -527,10 +586,18 @@ def ensure_eai(
 
     if not _eai_exists(session, resolved_eai):
         try:
-            statements = [
-                s.strip() for s in create_sql.split(";")
-                if s.strip() and not s.strip().startswith("--")
-            ]
+            statements = []
+            for s in create_sql.split(";"):
+                stripped = s.strip()
+                if not stripped:
+                    continue
+                body = "\n".join(
+                    ln for ln in stripped.splitlines()
+                    if not ln.lstrip().startswith("--")
+                ).strip()
+                if body:
+                    statements.append(stripped)
+
             for stmt in statements:
                 logger.info("Executing: %s...", stmt[:80])
                 session.sql(stmt).collect()
@@ -544,10 +611,11 @@ def ensure_eai(
             result["action"] = "created"
             result["domains_added"] = sorted(required_domains)
             result["sql"] = create_sql
+            _print_final_state(resolved_rule, sorted(required_domains))
             if not is_attached:
                 _print_attach_instructions(resolved_eai)
             else:
-                print("Ready.")
+                print("\nReady.")
             return result
         except Exception as exc:
             logger.warning("CREATE failed: %s", exc)
