@@ -132,8 +132,14 @@ def setup_r_environment(install_rpy2: bool = True, register_magic: bool = True) 
     if install_rpy2:
         try:
             import importlib
-            _rpy2_ok = importlib.util.find_spec("rpy2") is not None
-            _tab_ok = importlib.util.find_spec("tabulate") is not None
+            try:
+                _rpy2_ok = importlib.util.find_spec("rpy2") is not None
+            except OSError:
+                _rpy2_ok = False
+            try:
+                _tab_ok = importlib.util.find_spec("tabulate") is not None
+            except OSError:
+                _tab_ok = False
 
             if not _rpy2_ok:
                 subprocess.run(
