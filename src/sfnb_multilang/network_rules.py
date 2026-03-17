@@ -51,7 +51,10 @@ TOOLKIT_HOSTS = [
      "purpose": "GitHub source archives",
      "required": True, "category": "toolkit"},
     {"host": "objects.githubusercontent.com", "port": 443,
-     "purpose": "GitHub raw content / release assets",
+     "purpose": "GitHub raw content",
+     "required": True, "category": "toolkit"},
+    {"host": "release-assets.githubusercontent.com", "port": 443,
+     "purpose": "GitHub release asset downloads (redirect target)",
      "required": True, "category": "toolkit"},
 ]
 

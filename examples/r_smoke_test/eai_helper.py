@@ -34,6 +34,7 @@ TOOLKIT_DOMAINS = [
     "api.github.com",
     "codeload.github.com",
     "objects.githubusercontent.com",
+    "release-assets.githubusercontent.com",
 ]
 
 R_DOMAINS = [
@@ -56,7 +57,6 @@ R_DUCKDB_DOMAINS = [
 
 SCALA_DOMAINS = [
     "repo1.maven.org",
-    "release-assets.githubusercontent.com",
 ]
 
 JULIA_ODBC_DOMAINS = [

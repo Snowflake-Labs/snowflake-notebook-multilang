@@ -84,6 +84,7 @@ The EAI allows outbound HTTPS to these hosts:
 | `api.github.com` | GitHub API (pak dependency resolution) |
 | `codeload.github.com` | GitHub source archives |
 | `objects.githubusercontent.com` | GitHub raw content |
+| `release-assets.githubusercontent.com` | GitHub release asset downloads |
 | `pypi.org` | PyPI index (sfnb-multilang, rpy2) |
 | `files.pythonhosted.org` | PyPI file downloads |
 
