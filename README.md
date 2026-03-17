@@ -105,6 +105,17 @@ Access Integration SQL needed for package downloads.
 
 See [docs/network_rules.md](docs/network_rules.md) for details.
 
+## Examples
+
+The `examples/` directory contains ready-to-run Workspace Notebooks:
+
+| Example | What it tests |
+|---|---|
+| [R Smoke Test](examples/r_smoke_test/) | End-to-end validation of R, snowflakeR (Model Registry, Feature Store), and RSnowflake (DBI) |
+
+Each example includes a README with setup instructions, EAI configuration,
+and all files needed to upload to a Workspace Notebook.
+
 ## Documentation
 
 - [Quick Start Guide](docs/quickstart.md)

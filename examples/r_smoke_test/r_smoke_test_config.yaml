@@ -1,0 +1,41 @@
+# =============================================================================
+# R Smoke Test -- Combined Dependencies
+# =============================================================================
+# Installs R with dependencies for both snowflakeR and RSnowflake.
+# No ADBC/DuckDB to keep the install fast (~3 min).
+#
+# Usage:
+#   from sfnb_setup import install_r
+#   install_r(config="r_smoke_test_config.yaml")
+# =============================================================================
+
+env_name: "workspace_env"
+
+languages:
+  r:
+    enabled: true
+    r_version: "4.5.2"
+    conda_packages:
+      # Shared
+      - r-cli
+      - r-rlang>=1.0.0
+      - r-reticulate>=1.25
+      # snowflakeR
+      - r-tidyverse
+      - r-dbplyr
+      - r-httr2>=1.0.0
+      - r-lazyeval
+      # RSnowflake
+      - r-dbi>=1.2.0
+      - r-jsonlite
+      - r-dplyr>=1.1.0
+    cran_packages: []
+    addons:
+      adbc: false
+      duckdb: false
+
+  scala:
+    enabled: false
+
+  julia:
+    enabled: false

@@ -1,0 +1,24 @@
+# =============================================================================
+# R Smoke Test -- Notebook Configuration
+# =============================================================================
+# Copy this file to notebook_config.yaml and set your values.
+#
+# Usage:
+#   cp notebook_config.yaml.template notebook_config.yaml
+#   # Edit notebook_config.yaml with your values
+# =============================================================================
+
+context:
+  warehouse: "<YOUR_WAREHOUSE>"
+  database: "<YOUR_DATABASE>"
+  schema: "<YOUR_SCHEMA>"
+  # role: "<YOUR_ROLE>"   # Optional: uncomment to set a role
+
+# EAI (External Access Integration) -- optional
+# If your admin has already created an EAI and attached it to
+# your notebook service, specify its name here so Section 0 can
+# introspect it and add any missing domains automatically.
+# If omitted, Section 0 uses the convention name "multilang_notebook_eai".
+# eai:
+#   name: "<YOUR_EAI_NAME>"
+#   network_rule: "<YOUR_NETWORK_RULE_NAME>"
