@@ -40,9 +40,19 @@ languages:
   julia:
     enabled: false
 
-# Optional: pin specific tarball paths for snowflakeR and RSnowflake.
-# If set, the R install cell uses these instead of searching recursively.
-# Paths are relative to the Workspace root.
+# Optional: specify how to obtain R package tarballs.
+# Each entry can be a URL, a local path, or omitted entirely.
+#
+#   URL        -> downloaded via R's download.file(), then installed
+#   Local path -> installed directly (relative to Workspace root)
+#   Omitted    -> Workspace is searched recursively; if not found,
+#                 falls back to GitHub install via pak
+#
+# Core packages (snowflakeR and RSnowflake) have built-in fallback.
+# Additional packages listed here are installed in order.
+#
 # tarballs:
-#   snowflakeR: "snowflakeR_0.1.0.tar.gz"
-#   RSnowflake: "RSnowflake_0.2.0.tar.gz"
+#   snowflakeR: "https://github.com/Snowflake-Labs/snowflakeR/releases/download/v0.1.0/snowflakeR_0.1.0.tar.gz"
+#   RSnowflake: "https://github.com/Snowflake-Labs/RSnowflake/releases/download/v0.2.0/RSnowflake_0.2.0.tar.gz"
+#   myPackage:  "https://example.com/myPackage_1.0.0.tar.gz"
+#   localPkg:   "libs/localPkg_2.0.0.tar.gz"

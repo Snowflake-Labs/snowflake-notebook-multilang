@@ -97,17 +97,37 @@ Programmatic Access Token (PAT) is required.
 
 ### R Package Installation Options
 
-Two install methods are supported. The notebook auto-detects which to use:
+Three install methods are supported per package (auto-detected):
 
 | Method | What you do | First run | Cached |
 |--------|-------------|-----------|--------|
-| **Local tarball** (recommended) | Upload `.tar.gz` files to Workspace | ~10 sec | ~10 sec |
-| **GitHub via pak** (default) | Nothing -- downloads automatically | ~2 min | ~10 sec |
+| **URL download** (recommended) | Set release URL in `r_smoke_test_config.yaml` | ~10 sec | ~10 sec |
+| **Local tarball** | Upload `.tar.gz` files to Workspace | ~10 sec | ~10 sec |
+| **GitHub via pak** (fallback) | Nothing -- downloads automatically | ~2 min | ~10 sec |
 
-The tarball path is ~12x faster on a clean container (no network download,
-no `pak` bootstrap, no bioconductor.org dependency).
+The tarball paths are ~12x faster on a clean container (no `pak` bootstrap,
+no bioconductor.org dependency).
 
-**Where to get the tarballs:** Download from GitHub Releases:
+**Configuration** (`r_smoke_test_config.yaml`):
+
+```yaml
+tarballs:
+  # URL -- downloaded at install time (needs EAI access to host)
+  snowflakeR: "https://github.com/Snowflake-Labs/snowflakeR/releases/download/v0.1.0/snowflakeR_0.1.0.tar.gz"
+  RSnowflake: "https://github.com/Snowflake-Labs/RSnowflake/releases/download/v0.2.0/RSnowflake_0.2.0.tar.gz"
+  # Local path -- installed directly
+  # myPackage: "libs/myPackage_1.0.0.tar.gz"
+  # Omitted -- searches Workspace recursively, then falls back to pak
+```
+
+If `tarballs` is omitted entirely, the notebook searches the Workspace
+(including subfolders) for `snowflakeR_*.tar.gz` and `RSnowflake_*.tar.gz`.
+If multiple versions are found, the newest is installed.
+
+Additional R packages beyond snowflakeR and RSnowflake can also be listed
+under `tarballs` -- they are installed from their URL or local tarball.
+
+**Where to get the tarballs:** GitHub Releases:
 
 - <https://github.com/Snowflake-Labs/snowflakeR/releases>
 - <https://github.com/Snowflake-Labs/RSnowflake/releases>
@@ -118,11 +138,6 @@ Or via CLI:
 gh release download --repo Snowflake-Labs/snowflakeR --pattern "*.tar.gz"
 gh release download --repo Snowflake-Labs/RSnowflake --pattern "*.tar.gz"
 ```
-
-Upload the `.tar.gz` files anywhere in your Workspace -- the notebook
-searches recursively including subfolders. If multiple versions are found,
-the newest is installed. You can also pin specific paths in
-`r_smoke_test_config.yaml` under the `tarballs` section.
 
 ### Database & Schema
 
