@@ -52,7 +52,7 @@ class RPlugin(LanguagePlugin):
         return packages
 
     def get_pip_packages(self, config: ToolkitConfig) -> list[str]:
-        return []
+        return list(config.r.pip_packages)
 
     def get_network_hosts(self, config: ToolkitConfig) -> list[dict]:
         r_cfg = config.r

@@ -27,6 +27,7 @@ class RConfig:
         "r-tidyverse", "r-dbplyr", "r-httr2", "r-lazyeval", "r-reticulate>=1.25",
     ])
     cran_packages: List[str] = field(default_factory=list)
+    pip_packages: List[str] = field(default_factory=list)
     addons: Dict[str, bool] = field(default_factory=lambda: {
         "adbc": False,
         "duckdb": False,
@@ -128,6 +129,8 @@ def _merge_r(raw: dict) -> RConfig:
         cfg.conda_packages = list(raw["conda_packages"])
     if "cran_packages" in raw and raw["cran_packages"] is not None:
         cfg.cran_packages = list(raw["cran_packages"])
+    if "pip_packages" in raw and raw["pip_packages"] is not None:
+        cfg.pip_packages = list(raw["pip_packages"])
     addons = raw.get("addons", raw)  # support both nested and flat
     cfg.addons = {
         "adbc": bool(addons.get("adbc", addons.get("install_adbc", False))),
@@ -262,6 +265,7 @@ def config_to_dict(cfg: ToolkitConfig) -> dict:
                 "r_version": cfg.r.r_version,
                 "conda_packages": cfg.r.conda_packages,
                 "cran_packages": cfg.r.cran_packages,
+                "pip_packages": cfg.r.pip_packages,
                 "addons": cfg.r.addons,
             },
             "scala": {
