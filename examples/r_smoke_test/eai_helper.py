@@ -220,19 +220,24 @@ def _get_rule_domains(session, rule_name: str) -> set[str]:
     return set()
 
 
-# ── Service settings introspection ───────────────────────────────────────
+# ── EAI discovery ────────────────────────────────────────────────────────
+#
+# .snowflake/settings.json is a private implementation detail -- it is
+# created lazily and NOT guaranteed to exist.  We use it as a best-effort
+# hint only; the primary discovery path is SQL-based.
+#
 
 
-def _find_settings_json() -> str | None:
-    """Locate .snowflake/settings.json by searching likely paths.
+def _hint_eais_from_settings() -> list[str]:
+    """Best-effort: read EAI names from .snowflake/settings.json.
 
-    Workspace Notebooks may have a different CWD than the notebook file
-    directory, so we check multiple locations.
+    This file is NOT a stable contract (per Snowflake engineering).  It is
+    created lazily and may not exist in fresh Workspaces.  Returns an
+    empty list if not found or unreadable.
     """
     candidates = [
         os.path.join(os.getcwd(), ".snowflake", "settings.json"),
     ]
-    # Walk up from CWD (max 5 levels)
     d = os.getcwd()
     for _ in range(5):
         p = os.path.join(d, ".snowflake", "settings.json")
@@ -242,12 +247,10 @@ def _find_settings_json() -> str | None:
         if parent == d:
             break
         d = parent
-    # Also check /home/jupyter and common Workspace roots
     for root in ("/home/jupyter", "/home"):
         p = os.path.join(root, ".snowflake", "settings.json")
         if p not in candidates:
             candidates.append(p)
-    # Scan /filesystem/ mounts (Workspace notebook files live there)
     try:
         for entry in os.listdir("/filesystem"):
             p = os.path.join("/filesystem", entry, ".snowflake", "settings.json")
@@ -257,37 +260,75 @@ def _find_settings_json() -> str | None:
         pass
 
     for path in candidates:
-        if os.path.isfile(path):
-            return path
-    return None
+        try:
+            with open(path) as f:
+                data = json.load(f)
+            svc = (
+                data
+                .get("notebookSettings", {})
+                .get("serviceDefaults", {})
+            )
+            raw = svc.get("externalAccessIntegrations", [])
+            names = [name.upper() for name in raw if name]
+            if names:
+                return names
+        except Exception:
+            continue
+    return []
 
 
-def _get_attached_eais() -> list[str]:
-    """Read EAIs attached to this notebook service.
+def _discover_eais_via_sql(session) -> list[str]:
+    """Discover EAIs visible to the current role via SHOW command.
 
-    Workspace Notebooks expose the current service configuration in
-    ``.snowflake/settings.json``.  This file is written by the control
-    plane at service startup (read-only from the notebook's perspective
-    -- local writes are overwritten on restart).
-
-    Returns a list of EAI names (upper-cased for comparison), or an
-    empty list if the file is missing or unreadable.
+    Returns a list of enabled EAI names (upper-cased) the role can see.
     """
-    settings_path = _find_settings_json()
-    if not settings_path:
-        return []
     try:
-        with open(settings_path) as f:
-            data = json.load(f)
-        svc = (
-            data
-            .get("notebookSettings", {})
-            .get("serviceDefaults", {})
-        )
-        raw = svc.get("externalAccessIntegrations", [])
-        return [name.upper() for name in raw if name]
+        rows = session.sql(
+            "SHOW EXTERNAL ACCESS INTEGRATIONS"
+        ).collect()
+        names = []
+        for row in rows:
+            try:
+                d = row.as_dict()
+            except Exception:
+                continue
+            upper_d = {str(k).upper(): v for k, v in d.items()}
+            enabled = str(upper_d.get("ENABLED", "")).lower()
+            if enabled not in ("true", "1"):
+                continue
+            name = str(upper_d.get("NAME", "")).upper()
+            if name:
+                names.append(name)
+        return names
     except Exception:
         return []
+
+
+def _is_open_eai(session, eai_name: str) -> bool:
+    """Check whether an EAI is effectively open (allows all egress).
+
+    Detects wildcard patterns: 0.0.0.0/0 (IPV4) or 0.0.0.0:port (HOST_PORT).
+    """
+    rules = _get_eai_rule_names(session, eai_name)
+    if not rules:
+        return False
+    for rule_name in rules:
+        try:
+            rows = session.sql(
+                f"DESCRIBE NETWORK RULE {rule_name}"
+            ).collect()
+            for row in rows:
+                try:
+                    d = row.as_dict()
+                except Exception:
+                    d = {str(i): row[i] for i in range(len(row))}
+                for v in d.values():
+                    s = str(v)
+                    if "0.0.0.0/0" in s or "0.0.0.0:" in s:
+                        return True
+        except Exception:
+            continue
+    return False
 
 
 # ── Main entry point ────────────────────────────────────────────────────
@@ -370,40 +411,86 @@ def ensure_eai(
     except Exception:
         pass
 
-    # -- Check if EAI is attached to the service ----------------------------
-    attached = _get_attached_eais()
-    is_attached = resolved_eai.upper() in attached
+    # -- Multi-tier EAI discovery ------------------------------------------
+    # 1. Explicit name from notebook_config.yaml / function parameter
+    # 2. Best-effort hint from .snowflake/settings.json (not guaranteed)
+    # 3. SHOW EXTERNAL ACCESS INTEGRATIONS (SQL -- role-dependent)
+    # 4. Convention name fallback
+    #
+    # .snowflake/settings.json is a private implementation detail and may
+    # not exist.  We never rely on it as the sole discovery mechanism.
 
-    # If the configured EAI isn't attached but another one is, use it
-    if not is_attached and attached:
-        alt = attached[0]
-        print(
-            f"Configured EAI '{resolved_eai}' is not attached, "
-            f"but found attached EAI '{alt}' -- using that instead."
-        )
-        resolved_eai = alt
-        is_attached = True
-        # Discover the rule name from the attached EAI
-        alt_rules = _get_eai_rule_names(session, resolved_eai)
-        if alt_rules:
-            resolved_rule = alt_rules[0]
+    user_specified = bool(eai_name or eai_section.get("name"))
+
+    # Tier 2: best-effort settings.json hint
+    settings_eais = _hint_eais_from_settings()
+
+    # Tier 3: SQL discovery
+    sql_eais = _discover_eais_via_sql(session)
+
+    # Build a unified candidate list (preserving priority order)
+    eai_candidates: list[str] = []
+    if user_specified:
+        eai_candidates.append(resolved_eai.upper())
+    for name in settings_eais:
+        if name not in eai_candidates:
+            eai_candidates.append(name)
+    for name in sql_eais:
+        if name not in eai_candidates:
+            eai_candidates.append(name)
+    if resolved_eai.upper() not in eai_candidates:
+        eai_candidates.append(resolved_eai.upper())
+
+    # Pick the first candidate that actually exists
+    chosen_eai = resolved_eai
+    discovery_source = "convention name"
+    for candidate in eai_candidates:
+        if _eai_exists(session, candidate):
+            chosen_eai = candidate
+            if candidate == resolved_eai.upper() and user_specified:
+                discovery_source = "notebook_config"
+            elif candidate in settings_eais:
+                discovery_source = "settings.json (hint)"
+            elif candidate in sql_eais:
+                discovery_source = "SHOW INTEGRATIONS"
+            else:
+                discovery_source = "convention name"
+            break
+
+    resolved_eai = chosen_eai
+
+    # Discover the rule name from the chosen EAI
+    eai_rules = _get_eai_rule_names(session, resolved_eai)
+    if eai_rules:
+        resolved_rule = eai_rules[0]
 
     result = {
         "eai_name": resolved_eai,
         "rule_name": resolved_rule,
         "action": "no_change",
-        "attached": is_attached,
+        "discovery": discovery_source,
         "domains_added": [],
     }
 
-    if is_attached:
-        print(f"EAI '{resolved_eai}' is attached to this service.")
-    else:
-        print("No EAIs detected on this service.")
+    eai_found = _eai_exists(session, resolved_eai)
 
-    # -- EAI already exists: introspect and merge --------------------------
-    if _eai_exists(session, resolved_eai):
-        eai_rules = _get_eai_rule_names(session, resolved_eai)
+    if eai_found:
+        print(f"EAI '{resolved_eai}' found (via {discovery_source}).")
+    else:
+        print(f"No existing EAI found (tried: {', '.join(eai_candidates)}).")
+
+    # -- Open-EAI detection ------------------------------------------------
+    if eai_found and _is_open_eai(session, resolved_eai):
+        print(
+            f"  EAI '{resolved_eai}' allows all egress (open EAI) -- "
+            f"no domain changes needed."
+        )
+        result["action"] = "open_eai"
+        print("\nReady -- run Section 1.")
+        return result
+
+    # -- EAI exists: introspect and merge ----------------------------------
+    if eai_found:
         actual_rule = eai_rules[0] if eai_rules else resolved_rule
 
         current = _get_rule_domains(session, actual_rule)
@@ -417,10 +504,7 @@ def ensure_eai(
         if not missing:
             print(f"\n  All {len(required)} required domains present.")
             _print_final_state(actual_rule, current)
-            if is_attached:
-                print("\nReady -- run Section 1.")
-            else:
-                _print_attach_instructions(resolved_eai)
+            print("\nReady -- run Section 1.")
             return result
 
         merged = sorted(current | required)
@@ -440,11 +524,8 @@ def ensure_eai(
             result["rule_name"] = actual_rule
             result["domains_added"] = added
             _print_final_state(actual_rule, merged)
-            if is_attached:
-                print("\nChanges take effect immediately.")
-                print("Ready -- run Section 1.")
-            else:
-                _print_attach_instructions(resolved_eai)
+            print("\nChanges take effect immediately.")
+            print("Ready -- run Section 1.")
             return result
         except Exception as exc:
             print(f"\nALTER failed (insufficient privileges?): {exc}")
@@ -475,7 +556,7 @@ def ensure_eai(
     if grant:
         full_sql += f"\n{grant};\n"
 
-    if not _eai_exists(session, resolved_eai):
+    if not eai_found:
         try:
             session.sql(create_rule).collect()
             print(f"Created network rule: {resolved_rule}")
@@ -490,10 +571,7 @@ def ensure_eai(
             result["action"] = "created"
             result["domains_added"] = all_domains
             _print_final_state(resolved_rule, all_domains)
-            if not is_attached:
-                _print_attach_instructions(resolved_eai)
-            else:
-                print("\nReady -- run Section 1.")
+            _print_attach_instructions(resolved_eai)
             return result
         except Exception as exc:
             print(f"CREATE failed (insufficient privileges?): {exc}")
@@ -505,8 +583,7 @@ def ensure_eai(
     )
     print("Share this SQL with your Snowflake admin:\n")
     print(full_sql)
-    if not is_attached:
-        _print_attach_instructions(resolved_eai)
+    _print_attach_instructions(resolved_eai)
     result["action"] = "print_sql"
     return result
 
