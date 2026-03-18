@@ -1,0 +1,44 @@
+# =============================================================================
+# Scala/Java Smoke Test -- Combined Dependencies
+# =============================================================================
+# Single config for the Scala/Java smoke test notebook. Covers session context,
+# EAI settings, and Scala/Java environment.
+#
+# Usage (single cell):
+#   from sfnb_setup import setup_notebook
+#   setup_notebook(config="scala_smoke_test_config.yaml")
+#
+# All sections below are OPTIONAL -- sensible defaults are used when omitted.
+# =============================================================================
+
+# -- Session context (optional) -----------------------------------------------
+# If omitted, the session's existing database/schema/warehouse are used.
+# context:
+#   warehouse: "MY_WH"
+#   database: "MY_DB"
+#   schema: "MY_SCHEMA"
+
+# -- EAI settings (optional) --------------------------------------------------
+# managed: name of an EAI you own and allow the script to modify.
+# supplementary_name: name for auto-created EAI (default: MULTILANG_NOTEBOOK_EAI).
+# If omitted, EAIs are auto-discovered via SHOW EXTERNAL ACCESS INTEGRATIONS.
+# eai:
+#   managed: "MY_EAI"
+#   supplementary_name: "MULTILANG_NOTEBOOK_EAI"
+
+# -- Language and package spec ------------------------------------------------
+env_name: "workspace_env"
+
+languages:
+  r:
+    enabled: false
+
+  scala:
+    enabled: true
+    java_version: "17"
+    scala_version: "2.12"
+    snowpark_version: "1.18.0"
+    ammonite_version: "3.0.8"
+
+  julia:
+    enabled: false
