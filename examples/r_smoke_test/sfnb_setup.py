@@ -546,30 +546,51 @@ def ensure_eai(
     except Exception:
         pass
 
-    # -- Discover all EAIs -------------------------------------------------
-    # Tier 1: DESC SERVICE (non-interactive runs where SNOWFLAKE_SERVICE_NAME
-    #         is set -- gives exact EAIs attached to *this* service)
-    # Tier 2: .snowflake/settings.json (best-effort hint, lazily created)
-    # Tier 3: SHOW EXTERNAL ACCESS INTEGRATIONS (all visible to role)
+    # -- Discover EAIs -----------------------------------------------------
+    # Tier 1: DESC SERVICE  -- exact EAIs attached to *this* service
+    #         (only in non-interactive runs where SNOWFLAKE_SERVICE_NAME is set)
+    # Tier 2: .snowflake/settings.json -- best-effort hint of attached EAIs
+    # Tier 3: SHOW EXTERNAL ACCESS INTEGRATIONS -- all visible to role
+    #         (NOT scoped to this service -- can't assume they're attached)
     service_eais = _discover_eais_via_service(session)
     settings_eais = _hint_eais_from_settings()
     sql_eais = _discover_eais_via_sql(session)
-    all_eais = list(dict.fromkeys(service_eais + settings_eais + sql_eais))
 
-    source = "DESC SERVICE" if service_eais else (
-        "settings.json" if settings_eais else "SHOW INTEGRATIONS")
-    _log(f"Discovered {len(all_eais)} EAI(s) via {source}: "
-         f"{', '.join(all_eais) or '(none)'}", quiet=quiet)
+    # "attached" = EAIs we KNOW are attached to this service (Tier 1/2)
+    attached_eais = list(dict.fromkeys(service_eais + settings_eais))
+    discovery_is_trusted = bool(attached_eais)
 
-    # -- Check for open EAIs (allow-all) -----------------------------------
-    for eai in all_eais:
+    # When we don't know what's attached, narrow to EAIs we expect:
+    # the managed EAI from config, or the convention name
+    if discovery_is_trusted:
+        relevant_eais = attached_eais
+        source = "DESC SERVICE" if service_eais else "settings.json"
+    else:
+        candidate_names = set()
+        if managed:
+            candidate_names.add(managed.upper())
+        candidate_names.add(supplementary_name.upper())
+        sql_upper = {e.upper(): e for e in sql_eais}
+        relevant_eais = [
+            sql_upper[n] for n in candidate_names if n in sql_upper
+        ]
+        source = "SHOW INTEGRATIONS (filtered)"
+
+    _log(f"Discovered {len(sql_eais)} EAI(s) visible to role, "
+         f"{len(relevant_eais)} relevant to this service via {source}.",
+         quiet=quiet)
+    if relevant_eais:
+        _log(f"  Relevant: {', '.join(relevant_eais)}", quiet=quiet)
+
+    # -- Check for open EAIs (allow-all) -- ONLY on relevant/attached ------
+    for eai in relevant_eais:
         if _is_open_eai(session, eai):
             _log(f"  EAI '{eai}' allows all egress (open) -- "
                  f"no domain changes needed.", quiet=quiet)
             return {"action": "open_eai", "eai_name": eai, "domains_added": []}
 
-    # -- Collect domains from all EAIs ------------------------------------
-    eai_domains = _collect_all_eai_domains(session, all_eais)
+    # -- Collect domains from relevant EAIs --------------------------------
+    eai_domains = _collect_all_eai_domains(session, relevant_eais)
     all_covered = set()
     for doms in eai_domains.values():
         all_covered |= doms
@@ -587,11 +608,12 @@ def ensure_eai(
     }
 
     if not missing:
-        _log("All required domains are covered by existing EAI(s).", quiet=quiet)
+        _log("All required domains are covered.", quiet=quiet)
         return result
 
     # -- Strategy: modify managed EAI or create supplementary --------------
-    if managed and managed.upper() in [e.upper() for e in all_eais]:
+    all_visible_upper = {e.upper() for e in sql_eais}
+    if managed and managed.upper() in all_visible_upper:
         managed_upper = managed.upper()
         rules = _get_eai_rule_names(session, managed_upper)
         actual_rule = rules[0] if rules else rule_suffix
