@@ -108,7 +108,41 @@ def setup_r_environment(install_rpy2: bool = True, register_magic: bool = True) 
     os.environ["PATH"] = f"{R_ENV_PREFIX}/bin:" + os.environ.get("PATH", "")
     os.environ["R_HOME"] = f"{R_ENV_PREFIX}/lib/R"
     result['r_home'] = os.environ["R_HOME"]
-    
+
+    # Set TZ before R initialises (SPCS/Workspace containers have a broken
+    # /var/db/timezone/localtime symlink that causes R timezone warnings).
+    if not os.environ.get("TZ"):
+        import time as _time
+        tz_val = "UTC"
+        try:
+            from snowflake.snowpark.context import get_active_session
+            _session = get_active_session()
+            _rows = _session.sql("SELECT CURRENT_TIMEZONE() AS tz").collect()
+            if _rows:
+                tz_val = str(_rows[0]["TZ"]).strip() or "UTC"
+        except Exception:
+            pass
+        os.environ["TZ"] = tz_val
+        try:
+            _time.tzset()
+        except AttributeError:
+            pass
+
+    # Create timezone symlink so R/zoo/xts don't warn about mis-configured system
+    _tz_target = "/usr/share/zoneinfo/UTC"
+    _tz_link = "/var/db/timezone/localtime"
+    if os.path.isfile(_tz_target):
+        try:
+            if os.path.islink(_tz_link) and os.readlink(_tz_link) == _tz_target:
+                pass
+            else:
+                os.makedirs(os.path.dirname(_tz_link), exist_ok=True)
+                if os.path.islink(_tz_link):
+                    os.remove(_tz_link)
+                os.symlink(_tz_target, _tz_link)
+        except OSError:
+            pass
+
     # Verify R is accessible
     r_path = shutil.which('R')
     if not r_path:

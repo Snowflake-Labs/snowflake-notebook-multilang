@@ -107,6 +107,10 @@ class RPlugin(LanguagePlugin):
         # Fix library symlinks (libz.so, liblzma.so)
         self._fix_symlinks(env_prefix)
 
+        # Fix timezone symlink -- SPCS containers have a broken
+        # /var/db/timezone/localtime which causes R/zoo/xts warnings.
+        self._fix_timezone_symlink()
+
         # Install CRAN packages
         if r_cfg.cran_packages:
             self._install_cran_packages(env_prefix, r_cfg.cran_packages)
@@ -206,6 +210,27 @@ class RPlugin(LanguagePlugin):
             logger.info("    Symlinks already configured")
         else:
             logger.info("    Created %d symlink(s)", created)
+
+    def _fix_timezone_symlink(self) -> None:
+        """Create /var/db/timezone/localtime -> /usr/share/zoneinfo/UTC.
+
+        SPCS containers have a broken or missing localtime symlink which causes
+        R and packages like zoo/xts to emit "system is mis-configured" warnings.
+        """
+        target = "/usr/share/zoneinfo/UTC"
+        link = "/var/db/timezone/localtime"
+        if os.path.exists(link) and not os.path.islink(link):
+            return
+        if os.path.islink(link) and os.readlink(link) == target:
+            return
+        try:
+            os.makedirs(os.path.dirname(link), exist_ok=True)
+            if os.path.islink(link):
+                os.remove(link)
+            os.symlink(target, link)
+            logger.info("  Fixed timezone symlink: %s -> %s", link, target)
+        except OSError:
+            logger.debug("  Could not create timezone symlink (non-fatal)")
 
     def _install_cran_packages(self, env_prefix: str, packages: list[str]) -> None:
         """Install CRAN packages via R's install.packages()."""
