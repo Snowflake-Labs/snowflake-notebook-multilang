@@ -689,6 +689,28 @@ def _detect_monorepo():
     return None
 
 
+def _find_local_src():
+    """Find sfnb_multilang source tree relative to this file or cwd.
+
+    Walks up from both anchors looking for src/sfnb_multilang/__init__.py.
+    Works when sfnb_setup.py lives inside the snowflake-notebook-multilang
+    repo (e.g. Workspace created from the public repo) without needing
+    network access.
+    """
+    anchors = [os.path.dirname(os.path.abspath(__file__)), os.getcwd()]
+    for anchor in anchors:
+        d = anchor
+        for _ in range(10):
+            candidate = os.path.join(d, "src", "sfnb_multilang", "__init__.py")
+            if os.path.isfile(candidate):
+                return os.path.join(d, "src")
+            parent = os.path.dirname(d)
+            if parent == d:
+                break
+            d = parent
+    return None
+
+
 def _bootstrap():
     root = _detect_monorepo()
     if root:
@@ -707,12 +729,17 @@ def _bootstrap():
     except OSError:
         _found = False
     if not _found:
-        _GITHUB_URL = (
-            "sfnb-multilang @ https://github.com/Snowflake-Labs/"
-            "snowflake-notebook-multilang/archive/refs/heads/main.zip"
-        )
-        subprocess.check_call(
-            [sys.executable, "-m", "pip", "install", "-q", _GITHUB_URL])
+        local_src = _find_local_src()
+        if local_src:
+            if local_src not in sys.path:
+                sys.path.insert(0, local_src)
+        else:
+            _GITHUB_URL = (
+                "sfnb-multilang @ https://github.com/Snowflake-Labs/"
+                "snowflake-notebook-multilang/archive/refs/heads/main.zip"
+            )
+            subprocess.check_call(
+                [sys.executable, "-m", "pip", "install", "-q", _GITHUB_URL])
 
 
 _bootstrap()
