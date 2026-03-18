@@ -3,6 +3,54 @@
 The toolkit is configured via a YAML file. Every section is optional;
 omitted sections use sensible defaults.
 
+## Per-Notebook Config (setup_notebook)
+
+When using `setup_notebook()` from `sfnb_setup.py`, each notebook has its
+own `_config.yaml` that combines session context, EAI settings, and
+language/package configuration in a single file:
+
+```yaml
+# All sections are optional -- session defaults are used when omitted
+
+# Session context (overrides Snowpark session defaults)
+context:
+  warehouse: "MY_WH"
+  database: "MY_DB"
+  schema: "MY_SCHEMA"
+
+# EAI settings
+eai:
+  managed: "MY_EAI"                        # EAI to ALTER (optional)
+  supplementary_name: "MULTILANG_NOTEBOOK_EAI"  # name for auto-created EAI
+
+# Language runtime and packages
+languages:
+  r:
+    enabled: true
+    conda_packages:
+      - r-base
+      - r-reticulate
+    tarballs:
+      snowflakeR: "https://github.com/Snowflake-Labs/snowflakeR/releases/download/v0.1.0/snowflakeR_0.1.0.tar.gz"
+      RSnowflake: "https://github.com/Snowflake-Labs/RSnowflake/releases/download/v0.2.0/RSnowflake_0.2.0.tar.gz"
+```
+
+| Section | Purpose | Default |
+|---------|---------|---------|
+| `context` | Override session database/schema/warehouse | Session's current values |
+| `eai.managed` | Name of EAI to `ALTER` when adding domains | Auto-discovered |
+| `eai.supplementary_name` | Name for auto-created supplementary EAI | `MULTILANG_NOTEBOOK_EAI` |
+| `languages` | Language runtimes and packages to install | R enabled |
+| `languages.r.tarballs` | Map of package name to URL, local path, or omit for auto-search | `pak` from GitHub |
+
+**Zero-config usage:** If no config file is provided, `setup_notebook()`
+uses session defaults for context and installs R with no extra packages:
+
+```python
+from sfnb_setup import setup_notebook
+setup_notebook(packages=["snowflakeR"])
+```
+
 ## Top-Level Settings
 
 | Key | Default | Description |
@@ -23,6 +71,7 @@ omitted sections use sensible defaults.
 | `cran_packages` | `[]` | CRAN packages; `pkg==ver` for exact versions |
 | `addons.adbc` | `false` | Install ADBC Snowflake driver |
 | `addons.duckdb` | `false` | Install DuckDB with Snowflake extension |
+| `tarballs` | `{}` | Map of R package name to URL or local path |
 
 ### Scala/Java (`languages.scala`)
 

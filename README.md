@@ -8,6 +8,21 @@ Python in Snowflake Workspace Notebooks.
 
 ## Quick Start
 
+The fastest way to get R running in a Workspace Notebook is the all-in-one
+`setup_notebook()` function from `sfnb_setup.py`:
+
+```python
+# Single cell -- handles EAI, R runtime, packages, and session context
+from sfnb_setup import setup_notebook
+setup_notebook(config="my_config.yaml", packages=["snowflakeR"])
+```
+
+`sfnb_setup.py` is a standalone bootstrap file (no pip install required)
+that you upload alongside your notebook. It pip-installs `sfnb-multilang`
+on first run and orchestrates the full setup.
+
+**Alternative** -- use the `sfnb-multilang` API directly:
+
 ```python
 # Cell 1: Install the toolkit
 !pip install sfnb-multilang
@@ -16,11 +31,7 @@ Python in Snowflake Workspace Notebooks.
 from sfnb_multilang import install
 install(languages=["r", "scala"])
 
-# Cell 3: Set up R
-from r_helpers import setup_r_environment
-setup_r_environment()
-
-# Cell 4: Use R
+# Cell 3: Use R
 %%R
 library(dplyr)
 mtcars %>% group_by(cyl) %>% summarise(mean_mpg = mean(mpg))
@@ -29,10 +40,10 @@ mtcars %>% group_by(cyl) %>% summarise(mean_mpg = mean(mpg))
 ## Features
 
 - **Single command** installs any combination of R, Scala/Java, and Julia
-- **Fast** -- R base in ~20s, Scala/Java in ~30s, R + ADBC + DuckDB in ~2.5 min, Scala + Spark Connect in ~40s, cached re-runs in ~2s
+- **Fast** -- R base in ~45s, Scala/Java in ~30s, R + ADBC + DuckDB in ~2.5 min, Scala + Spark Connect in ~40s, cached re-runs in ~2s
 - **Shared infrastructure** -- micromamba and JDK are installed once, not per-language
-- **Automatic EAI setup** -- generates and optionally applies network rules
-- **Configuration-driven** -- YAML config with CLI flag overrides
+- **Automatic EAI management** -- multi-tier discovery, domain validation, and ALTER/CREATE with annotated SQL output
+- **Configuration-driven** -- per-notebook YAML config with optional context, EAI, and tarball settings
 - **Extensible** -- add new languages by implementing a Python plugin class
 - **Structured logging** -- configurable text or JSON log output
 
@@ -43,6 +54,33 @@ pip install sfnb-multilang
 ```
 
 ## Usage
+
+### setup_notebook() (Recommended)
+
+Upload `sfnb_setup.py` alongside your notebook (no pip install needed for
+the bootstrap). Create a `_config.yaml` with your settings:
+
+```yaml
+# All sections are optional -- session defaults are used when omitted
+context:
+  warehouse: "MY_WH"
+  database: "MY_DB"
+  schema: "MY_SCHEMA"
+
+eai:
+  managed: "MY_EAI"
+
+languages:
+  r:
+    enabled: true
+    tarballs:
+      snowflakeR: "https://github.com/Snowflake-Labs/snowflakeR/releases/download/v0.1.0/snowflakeR_0.1.0.tar.gz"
+```
+
+```python
+from sfnb_setup import setup_notebook
+setup_notebook(config="my_config.yaml", packages=["snowflakeR"])
+```
 
 ### From a Notebook Cell (Programmatic API)
 
@@ -102,6 +140,10 @@ Ready-made configs in the `configs/` directory:
 Snowflake Workspace Notebooks block outbound traffic by default. The
 toolkit can automatically generate (and optionally apply) the External
 Access Integration SQL needed for package downloads.
+
+`setup_notebook()` includes built-in multi-tier EAI discovery and
+management -- it discovers attached EAIs, validates domains, and
+creates or modifies network rules as needed.
 
 See [docs/network_rules.md](docs/network_rules.md) for details.
 

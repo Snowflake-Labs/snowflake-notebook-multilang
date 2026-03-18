@@ -19,54 +19,80 @@ Upload **all files in this folder** to a Snowflake Workspace Notebook:
 
 | File | Purpose |
 |------|---------|
-| `eai_helper.py` | Self-contained EAI management (no pip dependencies) |
-| `sfnb_setup.py` | Bootstrap -- pip-installs `sfnb-multilang` and sets up R |
-| `r_smoke_test_config.yaml` | Conda/CRAN package list for the R environment |
-| `notebook_config.yaml.template` | Template -- copy to `notebook_config.yaml` and edit |
+| `sfnb_setup.py` | All-in-one bootstrap: EAI, R runtime, R packages, session context |
+| `r_smoke_test_config.yaml` | Language, package, and (optional) session context / EAI config |
 | `workspace_r_smoke_test.ipynb` | The test notebook |
 
 ## Setup
 
-### EAI Setup
+### Single-cell bootstrap
 
-Workspace Notebooks block all outbound network traffic by default. Section 0
-of the notebook uses `eai_helper.py` to ensure the EAI has all domains needed
-for the configured languages.
+The notebook's first code cell calls `setup_notebook()`, which handles
+everything automatically:
+
+```python
+from sfnb_setup import setup_notebook
+setup_notebook(config="r_smoke_test_config.yaml", packages=["snowflakeR", "RSnowflake"])
+```
+
+This single call:
+
+1. **Sets session context** -- reads `context:` from the YAML, or uses the
+   session's existing database/schema/warehouse as defaults.
+2. **Validates the EAI** -- discovers all attached EAIs via multi-tier
+   introspection, checks required domains, and adds any that are missing
+   (via `ALTER NETWORK RULE` on a managed EAI, or by creating a supplementary
+   `MULTILANG_NOTEBOOK_EAI`).
+3. **Installs the R runtime** -- pip-installs `sfnb-multilang`, then runs
+   micromamba + conda-forge (~45 sec fresh, ~2 sec cached).
+4. **Installs R packages** -- from tarball URLs, local `.tar.gz` files, or
+   GitHub via `pak` (configured in the YAML).
+5. **Exports SPCS OAuth env vars** -- so RSnowflake can authenticate via the
+   built-in session token (no PAT needed).
+
+### EAI (External Access Integration)
+
+Workspace Notebooks block all outbound network traffic by default.
+`setup_notebook()` automatically discovers and manages EAIs:
 
 **How it works:**
 
-- **EAI already attached to your service?** Section 0 introspects its network
-  rule, adds any missing domains via `ALTER NETWORK RULE`, and changes take
-  effect immediately -- no restart needed.
-- **No EAI attached yet?** Section 0 creates the EAI + network rule and prints
-  instructions for the one-time manual attachment via the Snowsight UI.
-- **No privileges to create/alter?** Section 0 prints the complete SQL for
-  your admin.
+- **EAI already attached?** Introspects its network rules, adds any missing
+  domains via `ALTER NETWORK RULE`, and changes take effect immediately --
+  no restart needed.
+- **No EAI attached yet?** Creates one and prints instructions for the
+  one-time manual attachment via the Snowsight UI.
+- **No privileges?** Prints the complete SQL (with annotated domain
+  coverage) for your admin.
 
 Once created and attached, the same EAI can be reused across multiple
 Workspace Notebooks -- it is a one-time setup per service.
 
-**EAI name resolution:** Section 0 checks `notebook_config.yaml` for an
-explicit `eai.name`, then falls back to the convention name
-`multilang_notebook_eai`.
+**EAI name resolution (multi-tier):**
+
+1. Explicit `eai.managed` name from the config YAML
+2. `DESC SERVICE` (non-interactive/scheduled runs)
+3. `.snowflake/settings.json` (best-effort hint)
+4. `SHOW EXTERNAL ACCESS INTEGRATIONS` (all visible to role)
+5. Fallback convention name: `MULTILANG_NOTEBOOK_EAI`
 
 ### First-time steps (no EAI yet)
 
 1. Upload all files to a Workspace Notebook
-2. Copy `notebook_config.yaml.template` to `notebook_config.yaml` and edit it
+2. (Optional) Edit `r_smoke_test_config.yaml` to set `context:` overrides
 3. Open `workspace_r_smoke_test.ipynb`
-4. **Run Section 0** -- creates the EAI
+4. **Run the setup cell** -- creates the EAI
 5. Click **Connected** (top-left toolbar)
 6. Hover over your service name and click **Edit**
 7. Scroll to **External Access** > toggle **ON** the EAI > **Save**
 8. Service restarts automatically
-9. **Re-run Section 0** (it updates the network rule), then run **Section 1+**
+9. **Re-run the setup cell** (it updates the network rule), then run the tests
 
 ### Returning steps (EAI already attached)
 
 1. Open the notebook
-2. Run **Section 0** (verifies/updates domains -- takes ~1 sec)
-3. Run from **Section 1** onward
+2. Run the setup cell (verifies/updates domains -- takes ~1 sec)
+3. Run from the test sections onward
 
 ### Hosts in the EAI
 
@@ -80,6 +106,7 @@ The EAI allows outbound HTTPS to these hosts:
 | `repo.anaconda.com` | conda-forge CDN |
 | `binstar-cio-packages-prod.s3.amazonaws.com` | Anaconda S3 storage |
 | `cloud.r-project.org` | CRAN package downloads |
+| `bioconductor.org` | Bioconductor config (pak init) |
 | `github.com` | GitHub repos (sfnb-multilang, snowflakeR, RSnowflake) |
 | `api.github.com` | GitHub API (pak dependency resolution) |
 | `codeload.github.com` | GitHub source archives |
@@ -94,7 +121,9 @@ The EAI allows outbound HTTPS to these hosts:
 
 RSnowflake uses the Snowflake SQL API v2. In Workspace Notebooks the built-in
 SPCS OAuth token (`/snowflake/session/token`) is used automatically -- no
-Programmatic Access Token (PAT) is required.
+Programmatic Access Token (PAT) is required. `setup_notebook()` exports the
+necessary environment variables (`SNOWFLAKE_ACCOUNT`, `SNOWFLAKE_USER`, etc.)
+so that `dbConnect(Snowflake())` works with zero configuration.
 
 ### R Package Installation Options
 
@@ -112,13 +141,16 @@ no bioconductor.org dependency).
 **Configuration** (`r_smoke_test_config.yaml`):
 
 ```yaml
-tarballs:
-  # URL -- downloaded at install time (needs EAI access to host)
-  snowflakeR: "https://github.com/Snowflake-Labs/snowflakeR/releases/download/v0.1.0/snowflakeR_0.1.0.tar.gz"
-  RSnowflake: "https://github.com/Snowflake-Labs/RSnowflake/releases/download/v0.2.0/RSnowflake_0.2.0.tar.gz"
-  # Local path -- installed directly
-  # myPackage: "libs/myPackage_1.0.0.tar.gz"
-  # Omitted -- searches Workspace recursively, then falls back to pak
+languages:
+  r:
+    enabled: true
+    tarballs:
+      # URL -- downloaded at install time (needs EAI access to host)
+      snowflakeR: "https://github.com/Snowflake-Labs/snowflakeR/releases/download/v0.1.0/snowflakeR_0.1.0.tar.gz"
+      RSnowflake: "https://github.com/Snowflake-Labs/RSnowflake/releases/download/v0.2.0/RSnowflake_0.2.0.tar.gz"
+      # Local path -- installed directly
+      # myPackage: "libs/myPackage_1.0.0.tar.gz"
+      # Omitted -- searches Workspace recursively, then falls back to pak
 ```
 
 If `tarballs` is omitted entirely, the notebook searches the Workspace
@@ -144,12 +176,14 @@ gh release download --repo Snowflake-Labs/RSnowflake --pattern "*.tar.gz"
 
 The test reads from `CURRENT_TIMESTAMP()` and optionally writes a small test
 table. Any database/schema with CREATE TABLE privilege works.
+`setup_notebook()` uses the session's current database/schema by default --
+override via the `context:` section in the config YAML if needed.
 
 ## Expected Runtime
 
 | Step | First run (tarball) | First run (GitHub) | Cached |
 |------|--------------------|--------------------|--------|
-| EAI setup (Section 0) | ~5 sec | ~5 sec | skip |
+| EAI + context setup | ~5 sec | ~5 sec | ~1 sec |
 | Bootstrap R environment | ~45 sec | ~45 sec | ~2 sec |
 | Install snowflakeR + RSnowflake | **~10 sec** | ~2 min | ~10 sec |
 | Run all tests | ~30 sec | ~30 sec | ~30 sec |
@@ -161,6 +195,8 @@ Each test section prints `[PASS]` on success. The final Summary cell recaps all
 results. Common issues:
 
 - **`Name or service not known` during pip install**: EAI not enabled on the
-  notebook service -- run Section 0, then enable via Connected > Edit > External Access
-- **`Insufficient privileges` in Section 0**: Ask admin to run the printed SQL
-- **`sfr_load_notebook_config` error**: Check your `notebook_config.yaml`
+  notebook service -- run the setup cell, then enable via Connected > Edit > External Access
+- **`Insufficient privileges` in setup cell**: Ask admin to run the printed SQL
+- **`Object does not exist` SQL error**: Set `context.database` and
+  `context.schema` in the config YAML, or verify your session has a default
+  database/schema

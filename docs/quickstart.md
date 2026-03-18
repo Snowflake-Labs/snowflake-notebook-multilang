@@ -4,9 +4,24 @@
 
 1. A Snowflake Workspace Notebook
 2. An External Access Integration (EAI) configured for outbound network
-   access. The toolkit can generate the required SQL for you.
+   access. `setup_notebook()` can create/manage this automatically.
 
-## Step 1: Install the Toolkit
+## Recommended: setup_notebook() (single cell)
+
+Upload `sfnb_setup.py` alongside your notebook and create a `_config.yaml`:
+
+```python
+from sfnb_setup import setup_notebook
+setup_notebook(config="my_config.yaml", packages=["snowflakeR"])
+```
+
+This handles EAI validation, R runtime installation, R package installation,
+and session context in a single call. See the
+[R Smoke Test](../examples/r_smoke_test/) for a complete working example.
+
+## Alternative: Step-by-step setup
+
+### Step 1: Install the Toolkit
 
 In a notebook cell:
 
@@ -14,9 +29,10 @@ In a notebook cell:
 !pip install sfnb-multilang
 ```
 
-## Step 2: Configure Network Access
+### Step 2: Configure Network Access
 
-The toolkit can attempt to create the EAI automatically. If your role has
+`setup_notebook()` handles EAI automatically. If you prefer manual control,
+the toolkit can attempt to create the EAI. If your role has
 `CREATE INTEGRATION` privilege:
 
 ```python
@@ -28,9 +44,12 @@ If you lack privileges, the installer will print the SQL and save it to
 `eai_setup.sql` -- share this with your Snowflake administrator.
 
 After the EAI is created, enable it in Snowsight:
-**Notebook settings > External access > toggle on multilang_notebook_eai**
+**Connected > Edit > External Access > toggle on the EAI > Save**
 
-## Step 3: Install Languages
+Once created and attached, the same EAI can be reused across multiple
+Workspace Notebooks.
+
+### Step 3: Install Languages
 
 ```python
 from sfnb_multilang import install
@@ -46,7 +65,7 @@ install(config="config.yaml")
 
 | Configuration | Time |
 |---|---|
-| R base + tidyverse | ~20s |
+| R base + tidyverse | ~45s |
 | R + ADBC Snowflake driver | ~2 min (Go compilation) |
 | R + ADBC + DuckDB Snowflake extension | ~2.5 min |
 | Scala/Java + Snowpark | ~30s |
@@ -57,16 +76,12 @@ ADBC is the slowest step because it compiles the Go-based Snowflake
 driver from source. DuckDB adds ~10s for extension downloads.
 Spark Connect adds ~10s for PySpark and client JAR resolution.
 
-## Step 4: Use the Languages
+### Step 4: Use the Languages
 
-### R
+After `install()` (or `setup_notebook()`), the `%%R`, `%%scala`, and
+`%%julia` magics are registered automatically.
 
-```python
-from r_helpers import setup_r_environment
-setup_r_environment()
-```
-
-Then in subsequent cells:
+#### R
 
 ```r
 %%R
@@ -74,7 +89,7 @@ library(dplyr)
 mtcars %>% group_by(cyl) %>% summarise(mean_mpg = mean(mpg))
 ```
 
-### Scala
+#### Scala
 
 ```python
 from scala_helpers import setup_scala_environment
@@ -87,7 +102,7 @@ val x = 42
 println(s"The answer is $x")
 ```
 
-### Julia
+#### Julia
 
 ```python
 from julia_helpers import setup_julia_environment
@@ -113,9 +128,9 @@ afterwards, the conflicting handlers cause a kernel crash (SIGSEGV).
 **Required order:**
 
 ```python
-# 1. R (safe at any position)
-from r_helpers import setup_r_environment
-setup_r_environment()
+# 1. R (safe at any position -- setup_notebook handles this)
+from sfnb_setup import setup_notebook
+setup_notebook(config="my_config.yaml")
 
 # 2. Scala -- start JVM
 from scala_helpers import setup_scala_environment
