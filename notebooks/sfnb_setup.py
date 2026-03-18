@@ -738,8 +738,68 @@ def _bootstrap():
                 "sfnb-multilang @ https://github.com/Snowflake-Labs/"
                 "snowflake-notebook-multilang/archive/refs/heads/main.zip"
             )
-            subprocess.check_call(
-                [sys.executable, "-m", "pip", "install", "-q", _GITHUB_URL])
+            try:
+                subprocess.check_call(
+                    [sys.executable, "-m", "pip", "install", "-q",
+                     _GITHUB_URL])
+            except subprocess.CalledProcessError:
+                print(
+                    "\n"
+                    "============================================================\n"
+                    "  ERROR: Cannot install sfnb-multilang\n"
+                    "============================================================\n"
+                    "\n"
+                    "  The sfnb_multilang package was not found locally and\n"
+                    "  could not be downloaded from GitHub (no network access).\n"
+                    "\n"
+                    "  This usually means your Workspace Notebook service does\n"
+                    "  not have an External Access Integration (EAI) attached.\n"
+                    "\n"
+                    "  To fix this:\n"
+                    "\n"
+                    "  1. Create a Network Rule and EAI with at least these\n"
+                    "     domains:\n"
+                    "\n"
+                    "       github.com\n"
+                    "       objects.githubusercontent.com\n"
+                    "       release-assets.githubusercontent.com\n"
+                    "       pypi.org\n"
+                    "       files.pythonhosted.org\n"
+                    "       cloud.r-project.org\n"
+                    "       bioconductor.org\n"
+                    "\n"
+                    "     Example SQL:\n"
+                    "\n"
+                    "       CREATE OR REPLACE NETWORK RULE multilang_egress\n"
+                    "         MODE = EGRESS  TYPE = HOST_PORT\n"
+                    "         VALUE_LIST = (\n"
+                    "           'github.com',\n"
+                    "           'objects.githubusercontent.com',\n"
+                    "           'release-assets.githubusercontent.com',\n"
+                    "           'pypi.org', 'files.pythonhosted.org',\n"
+                    "           'cloud.r-project.org', 'bioconductor.org'\n"
+                    "         );\n"
+                    "\n"
+                    "       CREATE OR REPLACE EXTERNAL ACCESS INTEGRATION\n"
+                    "         MULTILANG_NOTEBOOK_EAI\n"
+                    "         ALLOWED_NETWORK_RULES = (multilang_egress)\n"
+                    "         ENABLED = TRUE;\n"
+                    "\n"
+                    "  2. Attach the EAI to your Notebook service via the\n"
+                    "     Snowsight UI:\n"
+                    "       Notebooks > ... > Notebook settings >\n"
+                    "       External access > toggle MULTILANG_NOTEBOOK_EAI on\n"
+                    "\n"
+                    "  3. Restart this notebook's kernel and re-run this cell.\n"
+                    "\n"
+                    "  Alternatively, create your Workspace from the\n"
+                    "  snowflake-notebook-multilang repo so the package source\n"
+                    "  is available locally (no EAI needed for bootstrap).\n"
+                    "\n"
+                    "============================================================\n",
+                    file=sys.stderr,
+                )
+                raise SystemExit(1)
 
 
 _bootstrap()
