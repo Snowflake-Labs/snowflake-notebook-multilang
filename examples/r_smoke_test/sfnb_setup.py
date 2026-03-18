@@ -326,6 +326,43 @@ def _hint_eais_from_settings() -> list[str]:
     return []
 
 
+def _discover_eais_via_service(session) -> list[str]:
+    """Get EAIs attached to this service via DESC SERVICE.
+
+    Only works when SNOWFLAKE_SERVICE_NAME is set (guaranteed in
+    non-interactive / scheduled notebook runs, not in interactive).
+    Returns the exact EAIs attached to *this* service, which is more
+    precise than SHOW INTEGRATIONS (which lists all visible to the role).
+    """
+    svc = os.environ.get("SNOWFLAKE_SERVICE_NAME")
+    if not svc:
+        return []
+    try:
+        db = (session.get_current_database() or "").replace('"', '')
+        schema = (session.get_current_schema() or "").replace('"', '')
+        if not db or not schema:
+            return []
+        fqn = f"{db}.{schema}.{svc}"
+        rows = session.sql(f"DESC SERVICE {fqn}").collect()
+        for row in rows:
+            try:
+                d = row.as_dict()
+            except Exception:
+                continue
+            upper_d = {str(k).upper(): v for k, v in d.items()}
+            prop = str(upper_d.get("PROPERTY", "")).upper()
+            if "EXTERNAL_ACCESS_INTEGRATIONS" in prop:
+                raw = str(upper_d.get("VALUE", ""))
+                return [
+                    name.strip(" '\"")
+                    for name in raw.strip("()").split(",")
+                    if name.strip(" '\"")
+                ]
+    except Exception:
+        pass
+    return []
+
+
 def _discover_eais_via_sql(session) -> list[str]:
     try:
         rows = session.sql("SHOW EXTERNAL ACCESS INTEGRATIONS").collect()
@@ -346,10 +383,36 @@ def _discover_eais_via_sql(session) -> list[str]:
         return []
 
 
+def _get_rule_type(session, rule_name: str) -> str:
+    """Return the TYPE of a network rule (e.g. 'HOST_PORT', 'IPV4')."""
+    try:
+        rows = session.sql(f"DESCRIBE NETWORK RULE {rule_name}").collect()
+        for row in rows:
+            try:
+                d = row.as_dict()
+            except Exception:
+                continue
+            upper_d = {str(k).upper(): v for k, v in d.items()}
+            prop = str(upper_d.get("PROPERTY", upper_d.get("NAME", ""))).upper()
+            if "TYPE" in prop and "HOST" not in prop and "VALUE" not in prop:
+                return str(upper_d.get("VALUE", upper_d.get(
+                    "PROPERTY_VALUE", ""))).upper().strip()
+    except Exception:
+        pass
+    return ""
+
+
 def _is_open_eai(session, eai_name: str) -> bool:
+    """Check whether an EAI is effectively open (allows all egress).
+
+    Detects two patterns per Snowflake docs:
+      - TYPE=IPV4  with VALUE_LIST containing '0.0.0.0/0'
+      - TYPE=HOST_PORT with VALUE_LIST containing '0.0.0.0:port'
+    """
     rules = _get_eai_rule_names(session, eai_name)
     for rule_name in rules:
         try:
+            rule_type = _get_rule_type(session, rule_name)
             rows = session.sql(f"DESCRIBE NETWORK RULE {rule_name}").collect()
             for row in rows:
                 try:
@@ -358,7 +421,11 @@ def _is_open_eai(session, eai_name: str) -> bool:
                     d = {str(i): row[i] for i in range(len(row))}
                 for v in d.values():
                     s = str(v)
-                    if "0.0.0.0/0" in s or "0.0.0.0:" in s:
+                    if rule_type == "IPV4" and "0.0.0.0/0" in s:
+                        return True
+                    if "0.0.0.0/0" in s:
+                        return True
+                    if "0.0.0.0:" in s:
                         return True
         except Exception:
             continue
@@ -480,12 +547,19 @@ def ensure_eai(
         pass
 
     # -- Discover all EAIs -------------------------------------------------
+    # Tier 1: DESC SERVICE (non-interactive runs where SNOWFLAKE_SERVICE_NAME
+    #         is set -- gives exact EAIs attached to *this* service)
+    # Tier 2: .snowflake/settings.json (best-effort hint, lazily created)
+    # Tier 3: SHOW EXTERNAL ACCESS INTEGRATIONS (all visible to role)
+    service_eais = _discover_eais_via_service(session)
     settings_eais = _hint_eais_from_settings()
     sql_eais = _discover_eais_via_sql(session)
-    all_eais = list(dict.fromkeys(settings_eais + sql_eais))
+    all_eais = list(dict.fromkeys(service_eais + settings_eais + sql_eais))
 
-    _log(f"Discovered {len(all_eais)} EAI(s): {', '.join(all_eais) or '(none)'}",
-         quiet=quiet)
+    source = "DESC SERVICE" if service_eais else (
+        "settings.json" if settings_eais else "SHOW INTEGRATIONS")
+    _log(f"Discovered {len(all_eais)} EAI(s) via {source}: "
+         f"{', '.join(all_eais) or '(none)'}", quiet=quiet)
 
     # -- Check for open EAIs (allow-all) -----------------------------------
     for eai in all_eais:
