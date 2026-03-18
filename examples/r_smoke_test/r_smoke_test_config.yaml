@@ -1,14 +1,32 @@
 # =============================================================================
 # R Smoke Test -- Combined Dependencies
 # =============================================================================
-# Installs R with dependencies for both snowflakeR and RSnowflake.
-# No ADBC/DuckDB to keep the install fast (~3 min).
+# Single config for the R smoke test notebook. Covers session context,
+# EAI settings, R environment, and package sources.
 #
-# Usage:
-#   from sfnb_setup import install_r
-#   install_r(config="r_smoke_test_config.yaml")
+# Usage (single cell):
+#   from sfnb_setup import setup_notebook
+#   setup_notebook(config="r_smoke_test_config.yaml")
+#
+# All sections below are OPTIONAL -- sensible defaults are used when omitted.
 # =============================================================================
 
+# -- Session context (optional) -----------------------------------------------
+# If omitted, the session's existing database/schema/warehouse are used.
+# context:
+#   warehouse: "MY_WH"
+#   database: "MY_DB"
+#   schema: "MY_SCHEMA"
+
+# -- EAI settings (optional) --------------------------------------------------
+# managed: name of an EAI you own and allow the script to modify.
+# supplementary_name: name for auto-created EAI (default: MULTILANG_NOTEBOOK_EAI).
+# If omitted, EAIs are auto-discovered via SHOW EXTERNAL ACCESS INTEGRATIONS.
+# eai:
+#   managed: "MY_EAI"
+#   supplementary_name: "MULTILANG_NOTEBOOK_EAI"
+
+# -- Language and package spec ------------------------------------------------
 env_name: "workspace_env"
 
 languages:
@@ -33,21 +51,9 @@ languages:
     addons:
       adbc: false
       duckdb: false
-    # Optional: specify how to obtain R package tarballs.
-    # Each entry can be a URL, a local path, or omitted entirely.
-    #
-    #   URL        -> downloaded via R's download.file(), then installed
-    #   Local path -> installed directly (relative to Workspace root)
-    #   Omitted    -> Workspace is searched recursively; if not found,
-    #                 falls back to GitHub install via pak
-    #
-    # Core packages (snowflakeR and RSnowflake) have built-in fallback.
-    # Additional packages listed here are installed in order.
     tarballs:
       snowflakeR: "https://github.com/Snowflake-Labs/snowflakeR/releases/download/v0.1.0/snowflakeR_0.1.0.tar.gz"
       RSnowflake: "https://github.com/Snowflake-Labs/RSnowflake/releases/download/v0.2.0/RSnowflake_0.2.0.tar.gz"
-      # myPackage: "https://example.com/myPackage_1.0.0.tar.gz"
-      # localPkg:  "libs/localPkg_2.0.0.tar.gz"
 
   scala:
     enabled: false
