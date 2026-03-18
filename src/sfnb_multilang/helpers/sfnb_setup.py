@@ -504,6 +504,47 @@ def _print_attach_instructions(eai_name: str, quiet: bool = False):
 # Section 7: ensure_eai -- EAI validation and creation
 # ==========================================================================
 
+def _test_domain_reachability(
+    domains: set[str],
+) -> tuple[set[str], set[str]]:
+    """Test DNS resolution for each domain (parallel).
+
+    Returns (reachable, unreachable).  In SPCS containers, network rules
+    control DNS -- if a domain isn't in an attached EAI, DNS won't resolve.
+    """
+    import socket
+    from concurrent.futures import ThreadPoolExecutor
+
+    def _check(domain):
+        try:
+            socket.getaddrinfo(domain, 443, socket.AF_INET, socket.SOCK_STREAM)
+            return (domain, True)
+        except (socket.gaierror, OSError):
+            return (domain, False)
+
+    reachable: set[str] = set()
+    unreachable: set[str] = set()
+    with ThreadPoolExecutor(max_workers=min(len(domains), 10)) as pool:
+        for domain, ok in pool.map(_check, domains):
+            (reachable if ok else unreachable).add(domain)
+    return reachable, unreachable
+
+
+def _find_target_eai(session, managed, supplementary_name) -> str | None:
+    """Find the target EAI name to inspect/modify.
+
+    Priority: managed (from config) > convention name > None.
+    Returns the name only if it exists (visible to role via SHOW INTEGRATIONS).
+    """
+    sql_eais = _discover_eais_via_sql(session)
+    upper_map = {e.upper(): e for e in sql_eais}
+    if managed and managed.upper() in upper_map:
+        return upper_map[managed.upper()]
+    if supplementary_name.upper() in upper_map:
+        return upper_map[supplementary_name.upper()]
+    return None
+
+
 def ensure_eai(
     session=None,
     config: str | None = None,
@@ -512,12 +553,15 @@ def ensure_eai(
 ) -> dict:
     """Validate EAI domains and create/modify as needed.
 
-    Multi-EAI strategy (Hybrid D):
-    1. Discover all visible EAIs, union their domains.
-    2. Compare against required domains from the config.
-    3. If ``eai_managed`` is specified: ALTER that EAI's rule.
-    4. Otherwise: CREATE a supplementary EAI with missing domains only.
-    5. Never modify an EAI that isn't explicitly designated.
+    Strategy:
+    1. If a named EAI is specified (config or convention): introspect its
+       domains via SQL (~0.5s).  If all required domains are present,
+       return immediately (fast path).  If missing, ALTER the network rule.
+    2. If no named EAI is found: test DNS reachability of required domains
+       (~3s parallel).  If all resolve, return (some unknown EAI covers us).
+       If unreachable, CREATE a supplementary EAI.
+    3. After any ALTER/CREATE: re-test previously-missing domains via DNS.
+       If still unreachable, warn that the EAI is likely not attached.
 
     Parameters
     ----------
@@ -546,101 +590,105 @@ def ensure_eai(
     except Exception:
         pass
 
-    # -- Discover EAIs -----------------------------------------------------
-    # Tier 1: DESC SERVICE  -- exact EAIs attached to *this* service
-    #         (only in non-interactive runs where SNOWFLAKE_SERVICE_NAME is set)
-    # Tier 2: .snowflake/settings.json -- best-effort hint of attached EAIs
-    # Tier 3: SHOW EXTERNAL ACCESS INTEGRATIONS -- all visible to role
-    #         (NOT scoped to this service -- can't assume they're attached)
-    service_eais = _discover_eais_via_service(session)
-    settings_eais = _hint_eais_from_settings()
-    sql_eais = _discover_eais_via_sql(session)
-
-    # "attached" = EAIs we KNOW are attached to this service (Tier 1/2)
-    attached_eais = list(dict.fromkeys(service_eais + settings_eais))
-    discovery_is_trusted = bool(attached_eais)
-
-    # When we don't know what's attached, narrow to EAIs we expect:
-    # the managed EAI from config, or the convention name
-    if discovery_is_trusted:
-        relevant_eais = attached_eais
-        source = "DESC SERVICE" if service_eais else "settings.json"
-    else:
-        candidate_names = set()
-        if managed:
-            candidate_names.add(managed.upper())
-        candidate_names.add(supplementary_name.upper())
-        sql_upper = {e.upper(): e for e in sql_eais}
-        relevant_eais = [
-            sql_upper[n] for n in candidate_names if n in sql_upper
-        ]
-        source = "SHOW INTEGRATIONS (filtered)"
-
-    _log(f"Discovered {len(sql_eais)} EAI(s) visible to role, "
-         f"{len(relevant_eais)} relevant to this service via {source}.",
-         quiet=quiet)
-    if relevant_eais:
-        _log(f"  Relevant: {', '.join(relevant_eais)}", quiet=quiet)
-
-    # -- Check for open EAIs (allow-all) -- ONLY on relevant/attached ------
-    for eai in relevant_eais:
-        if _is_open_eai(session, eai):
-            _log(f"  EAI '{eai}' allows all egress (open) -- "
-                 f"no domain changes needed.", quiet=quiet)
-            return {"action": "open_eai", "eai_name": eai, "domains_added": []}
-
-    # -- Collect domains from relevant EAIs --------------------------------
-    eai_domains = _collect_all_eai_domains(session, relevant_eais)
-    all_covered = set()
-    for doms in eai_domains.values():
-        all_covered |= doms
-
-    missing, coverage_map = _domain_coverage_map(required, eai_domains)
-
-    _log(f"  Required domains: {len(required)}", quiet=quiet)
-    _log(f"  Already covered : {len(required) - len(missing)}", quiet=quiet)
-    _log(f"  Missing         : {len(missing)}", quiet=quiet)
-
     result = {
         "action": "no_change",
         "eai_name": managed or supplementary_name,
         "domains_added": [],
     }
 
-    if not missing:
-        _log("All required domains are covered.", quiet=quiet)
-        return result
+    # -- Path A: Named EAI (fast metadata check) ---------------------------
+    target_eai = _find_target_eai(session, managed, supplementary_name)
 
-    # -- Strategy: modify managed EAI or create supplementary --------------
-    all_visible_upper = {e.upper() for e in sql_eais}
-    if managed and managed.upper() in all_visible_upper:
-        managed_upper = managed.upper()
-        rules = _get_eai_rule_names(session, managed_upper)
+    if target_eai:
+        target_upper = target_eai.upper()
+        _log(f"  EAI '{target_upper}' found. Checking domains...", quiet=quiet)
+
+        # Check for open EAI first (skip domain enumeration)
+        if _is_open_eai(session, target_upper):
+            _log(f"  EAI '{target_upper}' allows all egress (open).",
+                 quiet=quiet)
+            return {"action": "open_eai", "eai_name": target_upper,
+                    "domains_added": []}
+
+        # Introspect domains from this EAI's network rules
+        eai_domains = _collect_all_eai_domains(session, [target_upper])
+        covered = set()
+        for doms in eai_domains.values():
+            covered |= doms
+        missing = required - covered
+
+        if not missing:
+            _log(f"  EAI '{target_upper}' has all {len(required)} required "
+                 f"domains.", quiet=quiet)
+            result["eai_name"] = target_upper
+            return result
+
+        _log(f"  EAI '{target_upper}': {len(required) - len(missing)}"
+             f"/{len(required)} domains present, {len(missing)} missing.",
+             quiet=quiet)
+        for d in sorted(missing):
+            _log(f"    x  {d}", quiet=quiet)
+
+        # ALTER the named EAI's network rule to add missing domains
+        rules = _get_eai_rule_names(session, target_upper)
         actual_rule = rules[0] if rules else rule_suffix
         current = _get_rule_domains(session, actual_rule)
         merged = sorted(current | required)
         host_list = ", ".join(f"'{h}'" for h in merged)
-        alter_sql = f"ALTER NETWORK RULE {actual_rule} SET VALUE_LIST = ({host_list})"
-
+        alter_sql = (
+            f"ALTER NETWORK RULE {actual_rule} SET VALUE_LIST = ({host_list})"
+        )
         try:
             session.sql(alter_sql).collect()
             added = sorted(missing)
-            _log(f"\n  Updated managed EAI '{managed_upper}': "
-                 f"added {len(added)} domain(s).", quiet=quiet)
+            _log(f"  Updated '{target_upper}': added {len(added)} domain(s).",
+                 quiet=quiet)
             for d in added:
                 _log(f"    + {d}", quiet=quiet)
             result["action"] = "updated"
-            result["eai_name"] = managed_upper
+            result["eai_name"] = target_upper
             result["domains_added"] = added
+            _, coverage_map = _domain_coverage_map(required, eai_domains)
             _print_annotated_sql(
-                actual_rule, missing, coverage_map, managed_upper, quiet=quiet)
-            _log("\nChanges take effect immediately.", quiet=quiet)
+                actual_rule, missing, coverage_map, target_upper, quiet=quiet)
+            # Re-test via DNS to confirm the change is live
+            _, still_bad = _test_domain_reachability(missing)
+            if still_bad:
+                _log(f"\n  WARNING: {len(still_bad)} domain(s) still "
+                     f"unreachable after update.", quiet=quiet)
+                for d in sorted(still_bad):
+                    _log(f"    x  {d}", quiet=quiet)
+                _log("  The EAI may not be attached to this Notebook "
+                     "service.", quiet=quiet)
+                _print_attach_instructions(target_upper, quiet=quiet)
+            else:
+                _log("  Verified: all domains now reachable.", quiet=quiet)
             return result
         except Exception as exc:
-            _log(f"\n  ALTER on managed EAI failed: {exc}", quiet=quiet)
-            _log("  Falling back to supplementary EAI creation...", quiet=quiet)
+            _log(f"  ALTER failed: {exc}", quiet=quiet)
+            _log("  Falling back to supplementary EAI creation...",
+                 quiet=quiet)
 
-    # -- Create supplementary EAI with missing domains only ----------------
+    # -- Path B: No named EAI -- DNS reachability test ---------------------
+    if not target_eai:
+        _log(f"  No named EAI found. Testing {len(required)} domains via "
+             f"DNS...", quiet=quiet)
+        reachable, unreachable = _test_domain_reachability(required)
+
+        if not unreachable:
+            _log(f"  All {len(required)} domains reachable.", quiet=quiet)
+            return result
+
+        _log(f"  {len(reachable)} reachable, {len(unreachable)} "
+             f"unreachable:", quiet=quiet)
+        for d in sorted(unreachable):
+            _log(f"    x  {d}", quiet=quiet)
+        missing = unreachable
+    else:
+        # Path A ALTER failed -- missing was already computed above
+        pass
+
+    # -- Fix phase: CREATE supplementary EAI with missing domains ----------
     supp_rule = rule_suffix
     if managed:
         supp_rule = supplementary_name.replace("_EAI", "_EGRESS")
@@ -671,23 +719,34 @@ def ensure_eai(
         session.sql(create_eai).collect()
         if grant:
             session.sql(grant).collect()
-        _log(f"\n  Created supplementary EAI '{supplementary_name}' "
-             f"with {len(missing_sorted)} domain(s).", quiet=quiet)
+        _log(f"  Created EAI '{supplementary_name}' with "
+             f"{len(missing_sorted)} domain(s).", quiet=quiet)
         result["action"] = "created"
         result["eai_name"] = supplementary_name
         result["domains_added"] = missing_sorted
+
+        # Re-test to confirm the EAI is attached and working
+        _, still_bad = _test_domain_reachability(missing)
+        if still_bad:
+            _log(f"\n  WARNING: {len(still_bad)} domain(s) still unreachable "
+                 f"after creating EAI.", quiet=quiet)
+            _log("  The EAI is likely not attached to this Notebook "
+                 "service.", quiet=quiet)
+            _print_attach_instructions(supplementary_name, quiet=quiet)
+        else:
+            _log("  Verified: all domains now reachable.", quiet=quiet)
     except Exception as exc:
-        _log(f"\n  CREATE failed (insufficient privileges?): {exc}", quiet=quiet)
+        _log(f"  CREATE failed (insufficient privileges?): {exc}", quiet=quiet)
         result["action"] = "print_sql"
 
+    eai_domains = _collect_all_eai_domains(session, [target_eai or ""])
+    _, coverage_map = _domain_coverage_map(required, eai_domains)
     _print_annotated_sql(
         supp_rule, missing, coverage_map, supplementary_name, quiet=quiet)
 
     if result["action"] == "print_sql":
         _log("\nCould not create EAI (insufficient privileges).", quiet=quiet)
         _log("Share the SQL above with your Snowflake admin.", quiet=quiet)
-
-    if result["action"] in ("created", "print_sql"):
         _print_attach_instructions(supplementary_name, quiet=quiet)
 
     return result
