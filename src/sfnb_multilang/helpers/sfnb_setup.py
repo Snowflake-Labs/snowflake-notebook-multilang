@@ -1024,15 +1024,20 @@ def install_r_packages(
             _log(f"  {pkg}: WARNING could not resolve tarball", quiet=quiet)
 
     # Install pip packages required by R packages (e.g. nevergrad for Robyn)
+    # Skip packages already installed by Phase 4 of the toolkit installer.
     pip_pkgs: list = (
         cfg.get("languages", {}).get("r", {}).get("pip_packages")
     ) or []
     if pip_pkgs:
-        _log("\nPip packages (R dependencies):", quiet=quiet)
-        for pip_pkg in pip_pkgs:
-            _log(f"  pip install {pip_pkg}", quiet=quiet)
-            subprocess.check_call(
-                [sys.executable, "-m", "pip", "install", "-q", pip_pkg])
+        import importlib.util
+        missing = [p for p in pip_pkgs
+                   if importlib.util.find_spec(p.split("[")[0]) is None]
+        if missing:
+            _log("\nPip packages (R dependencies):", quiet=quiet)
+            for pip_pkg in missing:
+                _log(f"  pip install {pip_pkg}", quiet=quiet)
+                subprocess.check_call(
+                    [sys.executable, "-m", "pip", "install", "-q", pip_pkg])
 
     _log("\nInstalled versions:", quiet=quiet)
     for pkg in core + extras:
