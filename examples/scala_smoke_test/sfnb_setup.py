@@ -65,12 +65,32 @@ def _log(msg: str, *, quiet: bool = False):
 
 def _flush_log():
     """Write accumulated log lines to .sfnb_setup.log."""
-    try:
-        path = os.path.join(os.getcwd(), ".sfnb_setup.log")
-        with open(path, "w") as f:
-            f.write("\n".join(_LOG_LINES) + "\n")
-    except OSError:
-        pass
+    candidates = [
+        os.path.join(os.getcwd(), ".sfnb_setup.log"),
+        os.path.expanduser("~/.sfnb_setup.log"),
+        "/tmp/.sfnb_setup.log",
+    ]
+    content = "\n".join(_LOG_LINES) + "\n"
+    for path in candidates:
+        try:
+            with open(path, "w") as f:
+                f.write(content)
+            _LOG_LINES.append(f"[log] Written to {path}")
+            return
+        except OSError:
+            continue
+
+
+def _find_log_path():
+    """Return the path where the log was actually written, or None."""
+    for path in [
+        os.path.join(os.getcwd(), ".sfnb_setup.log"),
+        os.path.expanduser("~/.sfnb_setup.log"),
+        "/tmp/.sfnb_setup.log",
+    ]:
+        if os.path.exists(path):
+            return path
+    return None
 
 
 # ==========================================================================
@@ -1149,10 +1169,13 @@ def setup_notebook(
     _log(f"  Languages: {', '.join(langs)}", quiet=False)
     if packages:
         _log(f"  R packages: {', '.join(packages)}", quiet=False)
-    _log(f"  Log: .sfnb_setup.log", quiet=False)
     _log(f"{'=' * 60}", quiet=False)
 
     _flush_log()
+
+    log_path = _find_log_path()
+    if log_path:
+        print(f"  Log: {log_path}")
 
     return {
         "status": "ready",
