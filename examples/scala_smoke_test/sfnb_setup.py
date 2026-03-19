@@ -74,6 +74,42 @@ def _flush_log():
 
 
 # ==========================================================================
+# Section 1b: Pre-warm heavy ML imports
+# ==========================================================================
+
+def _prewarm_ml_imports(quiet: bool = False):
+    """Pre-import heavy snowflake-ml modules so first user cell is fast.
+
+    The first ``from snowflake.ml.feature_store import FeatureStore`` triggers
+    a cascading import of numpy, pandas, scikit-learn, ray, etc. that can take
+    60-120s in SPCS containers.  Doing it here moves the cost into the setup
+    phase where the user already expects a wait.
+
+    Also installs ``ipywidgets`` to suppress the "Missing packages" INFO
+    message that Ray emits on import (unusable in Workspace but noisy).
+    """
+    try:
+        import importlib.util
+        if importlib.util.find_spec("ipywidgets") is None:
+            subprocess.check_call(
+                [sys.executable, "-m", "pip", "install", "-q", "ipywidgets"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+    except Exception:
+        pass
+
+    t0 = time.monotonic()
+    try:
+        import snowflake.ml.feature_store  # noqa: F401
+        elapsed = time.monotonic() - t0
+        _log(f"  Pre-warmed snowflake.ml imports: {elapsed:.0f}s", quiet=quiet)
+    except ImportError:
+        pass
+    except Exception as exc:
+        _log(f"  Pre-warm snowflake.ml imports skipped: {exc}", quiet=quiet)
+
+
+# ==========================================================================
 # Section 2: YAML config reader
 # ==========================================================================
 
@@ -1081,6 +1117,9 @@ def setup_notebook(
             t_pkg = time.monotonic()
             install_r_packages(config=config, packages=packages, quiet=quiet)
             _log(f"  R packages: {time.monotonic() - t_pkg:.0f}s", quiet=quiet)
+
+            # Pre-warm heavy ML imports so first user cell isn't slow
+            _prewarm_ml_imports(quiet=quiet)
 
             # Set SPCS OAuth env vars for RSnowflake DBI connectivity
             pkgs = packages or ["snowflakeR", "RSnowflake"]
