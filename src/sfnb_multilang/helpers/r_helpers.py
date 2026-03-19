@@ -113,16 +113,7 @@ def setup_r_environment(install_rpy2: bool = True, register_magic: bool = True) 
     # /var/db/timezone/localtime symlink that causes R timezone warnings).
     if not os.environ.get("TZ"):
         import time as _time
-        tz_val = "UTC"
-        try:
-            from snowflake.snowpark.context import get_active_session
-            _session = get_active_session()
-            _rows = _session.sql("SELECT CURRENT_TIMEZONE() AS tz").collect()
-            if _rows:
-                tz_val = str(_rows[0]["TZ"]).strip() or "UTC"
-        except Exception:
-            pass
-        os.environ["TZ"] = tz_val
+        os.environ["TZ"] = "UTC"
         try:
             _time.tzset()
         except AttributeError:

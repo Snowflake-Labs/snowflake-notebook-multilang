@@ -522,19 +522,8 @@ def _start_spark_connect_server_early(
     except Exception:
         session = None
 
-    if session and not os.environ.get("TZ"):
-        tz_val = "UTC"
-        try:
-            rows = session.sql(
-                "SELECT CURRENT_TIMEZONE() AS tz"
-            ).collect()
-            if rows:
-                tz_val = (
-                    str(rows[0]["TZ"]).strip() or "UTC"
-                )
-        except Exception:
-            pass
-        os.environ["TZ"] = tz_val
+    if not os.environ.get("TZ"):
+        os.environ["TZ"] = "UTC"
         try:
             _time.tzset()
         except AttributeError:

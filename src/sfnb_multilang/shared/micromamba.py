@@ -6,11 +6,15 @@ import logging
 import os
 import platform
 import stat
+import tempfile
 
 from .download import retry
 from .subprocess_utils import run_cmd
 
 logger = logging.getLogger("sfnb_multilang.shared.micromamba")
+
+MIN_ARCHIVE_BYTES = 1_000_000  # bzip2 archive should be >1 MB
+MIN_BINARY_BYTES = 3_000_000   # standalone binary should be >3 MB
 
 
 def _get_platform_slug() -> str:
@@ -28,29 +32,133 @@ def _get_platform_slug() -> str:
         return "linux-64"
 
 
+def _make_executable(path: str) -> None:
+    st = os.stat(path)
+    os.chmod(path, st.st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+
+
+def _download_via_archive(target_dir: str, binary_path: str) -> str:
+    """Download bzip2 archive from micro.mamba.pm, extract to target_dir."""
+    slug = _get_platform_slug()
+    url = f"https://micro.mamba.pm/api/micromamba/{slug}/latest"
+    logger.info("Downloading micromamba archive from %s ...", url)
+
+    with tempfile.NamedTemporaryFile(suffix=".tar.bz2", delete=False) as tmp:
+        tmp_path = tmp.name
+
+    try:
+        run_cmd(
+            ["curl", "-fSL", "--retry", "3", "--retry-delay", "2",
+             "-o", tmp_path, url],
+            description="Download micromamba archive",
+        )
+        size = os.path.getsize(tmp_path)
+        if size < MIN_ARCHIVE_BYTES:
+            raise RuntimeError(
+                f"Downloaded archive too small ({size} bytes); "
+                f"expected >{MIN_ARCHIVE_BYTES}"
+            )
+        run_cmd(
+            ["tar", "-xjf", tmp_path, "-C", target_dir, "bin/micromamba"],
+            description="Extract micromamba",
+        )
+    finally:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+
+    _make_executable(binary_path)
+    return binary_path
+
+
+def _download_standalone(binary_path: str) -> str:
+    """Download standalone binary from GitHub Releases (no extraction)."""
+    slug = _get_platform_slug()
+    url = (
+        "https://github.com/mamba-org/micromamba-releases"
+        f"/releases/latest/download/micromamba-{slug}"
+    )
+    logger.info("Downloading standalone micromamba from %s ...", url)
+
+    with tempfile.NamedTemporaryFile(delete=False) as tmp:
+        tmp_path = tmp.name
+
+    try:
+        run_cmd(
+            ["curl", "-fSL", "--retry", "3", "--retry-delay", "2",
+             "-o", tmp_path, url],
+            description="Download micromamba binary",
+        )
+        size = os.path.getsize(tmp_path)
+        if size < MIN_BINARY_BYTES:
+            raise RuntimeError(
+                f"Downloaded binary too small ({size} bytes); "
+                f"expected >{MIN_BINARY_BYTES}"
+            )
+        os.replace(tmp_path, binary_path)
+        tmp_path = None  # don't unlink in finally
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+
+    _make_executable(binary_path)
+    return binary_path
+
+
+def _download_urllib(binary_path: str) -> str:
+    """Last-resort download using Python urllib (no curl dependency)."""
+    import urllib.request
+
+    slug = _get_platform_slug()
+    url = (
+        "https://github.com/mamba-org/micromamba-releases"
+        f"/releases/latest/download/micromamba-{slug}"
+    )
+    logger.info("Downloading micromamba via urllib from %s ...", url)
+    urllib.request.urlretrieve(url, binary_path)
+
+    size = os.path.getsize(binary_path)
+    if size < MIN_BINARY_BYTES:
+        os.unlink(binary_path)
+        raise RuntimeError(
+            f"Downloaded binary too small ({size} bytes); "
+            f"expected >{MIN_BINARY_BYTES}"
+        )
+    _make_executable(binary_path)
+    return binary_path
+
+
 @retry(max_attempts=3, delay=5)
 def download_micromamba(target_dir: str) -> str:
-    """Download the micromamba binary to target_dir/bin/micromamba."""
+    """Download the micromamba binary to target_dir/bin/micromamba.
+
+    Tries three strategies in order:
+      1. bzip2 archive from micro.mamba.pm (download to file, then extract)
+      2. Standalone binary from GitHub Releases via curl
+      3. Standalone binary from GitHub Releases via Python urllib
+    """
     bin_dir = os.path.join(target_dir, "bin")
     os.makedirs(bin_dir, exist_ok=True)
     binary_path = os.path.join(bin_dir, "micromamba")
 
-    slug = _get_platform_slug()
-    url = f"https://micro.mamba.pm/api/micromamba/{slug}/latest"
-    logger.info("Downloading micromamba from %s ...", url)
+    strategies = [
+        ("archive", lambda: _download_via_archive(target_dir, binary_path)),
+        ("github-curl", lambda: _download_standalone(binary_path)),
+        ("github-urllib", lambda: _download_urllib(binary_path)),
+    ]
 
-    # Download and extract in one step (tar -xvj extracts bzip2)
-    run_cmd(
-        ["sh", "-c", f"curl -Ls --retry 3 --retry-delay 2 '{url}' | tar -xvj -C '{target_dir}' bin/micromamba"],
-        description="Download micromamba",
-    )
+    last_exc: Exception | None = None
+    for name, fn in strategies:
+        try:
+            result = fn()
+            logger.info("micromamba installed at %s (via %s)", result, name)
+            return result
+        except Exception as exc:
+            logger.warning("micromamba download via %s failed: %s", name, exc)
+            last_exc = exc
 
-    # Ensure executable
-    st = os.stat(binary_path)
-    os.chmod(binary_path, st.st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
-
-    logger.info("micromamba installed at %s", binary_path)
-    return binary_path
+    raise RuntimeError(
+        f"All micromamba download strategies failed: {last_exc}"
+    ) from last_exc
 
 
 def ensure_micromamba(root: str, force: bool = False) -> str:
