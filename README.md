@@ -30,11 +30,30 @@ on first run and orchestrates the full setup.
 # Cell 2: Install R and Scala
 from sfnb_multilang import install
 install(languages=["r", "scala"])
+```
 
-# Cell 3: Use R
-%%R
+Three-language interop -- R, Python, and Scala each do what they're best at:
+
+```python
+# Cell 3: R — statistical summarisation, export to Python
+%%R -o car_stats
 library(dplyr)
-mtcars %>% group_by(cyl) %>% summarise(mean_mpg = mean(mpg))
+car_stats <- mtcars %>%
+  group_by(cyl) %>%
+  summarise(mean_mpg = mean(mpg), mean_hp = mean(hp))
+```
+
+```python
+# Cell 4: Python — feature engineering, load into Snowpark
+car_stats["efficiency"] = (car_stats["mean_mpg"] / car_stats["mean_hp"]).round(3)
+car_df = session.create_dataframe(car_stats)
+```
+
+```python
+# Cell 5: Scala — Snowpark DataFrame operations
+%%scala -i car_df
+import com.snowflake.snowpark.functions.col
+car_df.sort(col("efficiency").desc).show()
 ```
 
 ## Features
