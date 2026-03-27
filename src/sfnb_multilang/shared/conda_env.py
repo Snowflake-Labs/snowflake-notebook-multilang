@@ -84,20 +84,28 @@ def create_or_update_env(
     packages: list[str],
     channel: str = "conda-forge",
     force: bool = False,
+    ssl_cert_path: str = "",
 ) -> str:
     """Create or update a micromamba environment. Return the env prefix.
 
     Args:
         env_name: Name of the environment.
         packages: List of packages with optional version specifiers.
-        channel: Conda channel.
+        channel: Conda channel URL or name (e.g. "conda-forge" or an
+            Artifactory/Nexus remote repo URL).
         force: If True, reinstall even if packages exist.
+        ssl_cert_path: Path to a custom CA certificate bundle for
+            corporate TLS inspection proxies.
 
     Returns:
         Absolute path to the environment prefix.
     """
     mm = _micromamba_bin()
     exists = env_exists(env_name)
+
+    ssl_flags: list[str] = []
+    if ssl_cert_path and os.path.isfile(ssl_cert_path):
+        ssl_flags = ["--ssl-verify", ssl_cert_path]
 
     if exists and not force:
         logger.info("Checking installed packages in '%s'...", env_name)
@@ -107,19 +115,22 @@ def create_or_update_env(
         else:
             logger.info("  Installing missing packages: %s", " ".join(missing))
             run_cmd(
-                [mm, "install", "-y", "-n", env_name, "-c", channel] + missing,
+                [mm, "install", "-y", "-n", env_name, "-c", channel]
+                + ssl_flags + missing,
                 description="Install missing packages",
             )
     elif exists and force:
         logger.info("Force reinstalling packages in '%s'...", env_name)
         run_cmd(
-            [mm, "install", "-y", "-n", env_name, "-c", channel] + packages,
+            [mm, "install", "-y", "-n", env_name, "-c", channel]
+            + ssl_flags + packages,
             description="Update environment",
         )
     else:
         logger.info("Creating environment '%s'...", env_name)
         run_cmd(
-            [mm, "create", "-y", "-n", env_name, "-c", channel] + packages,
+            [mm, "create", "-y", "-n", env_name, "-c", channel]
+            + ssl_flags + packages,
             description="Create environment",
         )
 

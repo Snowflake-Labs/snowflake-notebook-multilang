@@ -58,7 +58,7 @@ class RPlugin(LanguagePlugin):
         r_cfg = config.r
         hosts: list[dict] = []
 
-        if r_cfg.cran_packages:
+        if r_cfg.cran_packages and not config.mirrors.cran_mirror:
             hosts.append({
                 "host": "cloud.r-project.org", "port": 443,
                 "purpose": "CRAN package downloads", "required": True,
@@ -102,6 +102,7 @@ class RPlugin(LanguagePlugin):
 
     def post_install(self, env_prefix: str, config: ToolkitConfig) -> PluginResult:
         r_cfg = config.r
+        cran_mirror = config.mirrors.cran_mirror or "https://cloud.r-project.org"
         warnings: list[str] = []
 
         # Fix library symlinks (libz.so, liblzma.so)
@@ -113,13 +114,13 @@ class RPlugin(LanguagePlugin):
 
         # Install CRAN packages
         if r_cfg.cran_packages:
-            self._install_cran_packages(env_prefix, r_cfg.cran_packages)
+            self._install_cran_packages(env_prefix, r_cfg.cran_packages, cran_mirror=cran_mirror)
 
         # Optional add-ons (these add significant install time)
         if r_cfg.addons.get("adbc"):
             import time as _time
             t0 = _time.monotonic()
-            self._install_adbc(env_prefix, config.env_name)
+            self._install_adbc(env_prefix, config.env_name, cran_mirror=cran_mirror)
             elapsed = _time.monotonic() - t0
             logger.info("    ADBC step took %.0fs", elapsed)
 
@@ -232,9 +233,14 @@ class RPlugin(LanguagePlugin):
         except OSError:
             logger.debug("  Could not create timezone symlink (non-fatal)")
 
-    def _install_cran_packages(self, env_prefix: str, packages: list[str]) -> None:
+    def _install_cran_packages(
+        self,
+        env_prefix: str,
+        packages: list[str],
+        cran_mirror: str = "https://cloud.r-project.org",
+    ) -> None:
         """Install CRAN packages via R's install.packages()."""
-        logger.info("  Installing CRAN packages...")
+        logger.info("  Installing CRAN packages (repo: %s)...", cran_mirror)
         r_bin = os.path.join(env_prefix, "bin", "R")
 
         latest = [p for p in packages if "==" not in str(p)]
@@ -252,7 +258,7 @@ class RPlugin(LanguagePlugin):
                 missing <- setdiff(pkgs, installed)
                 if (length(missing) > 0) {{
                     message("Installing CRAN packages: ", paste(missing, collapse=", "))
-                    install.packages(missing, repos="https://cloud.r-project.org", quiet=TRUE)
+                    install.packages(missing, repos="{cran_mirror}", quiet=TRUE)
                 }} else {{
                     message("All CRAN packages already installed")
                 }}
@@ -264,15 +270,15 @@ class RPlugin(LanguagePlugin):
             for pkg_name, pkg_version in versioned.items():
                 r_code = textwrap.dedent(f"""\
                     if (!requireNamespace("remotes", quietly=TRUE))
-                        install.packages("remotes", repos="https://cloud.r-project.org", quiet=TRUE)
+                        install.packages("remotes", repos="{cran_mirror}", quiet=TRUE)
                     remotes::install_version("{pkg_name}", version="{pkg_version}",
-                        repos="https://cloud.r-project.org", quiet=TRUE, upgrade="never")
+                        repos="{cran_mirror}", quiet=TRUE, upgrade="never")
                 """)
                 run_cmd([r_bin, "--vanilla", "--quiet", "-e", r_code],
                         description=f"Install CRAN {pkg_name}=={pkg_version}")
 
     @retry(max_attempts=2, delay=3)
-    def _install_adbc(self, env_prefix: str, env_name: str) -> None:
+    def _install_adbc(self, env_prefix: str, env_name: str, cran_mirror: str = "https://cloud.r-project.org") -> None:
         """Install ADBC Snowflake driver for R."""
         logger.info("  Installing ADBC Snowflake driver...")
         r_bin = os.path.join(env_prefix, "bin", "R")
@@ -291,7 +297,7 @@ class RPlugin(LanguagePlugin):
         r_code = textwrap.dedent(f"""\
             Sys.setenv(GO_BIN = "{go_bin}")
             if (!requireNamespace("adbcdrivermanager", quietly=TRUE)) {{
-                install.packages("adbcdrivermanager", repos="https://cloud.r-project.org", quiet=TRUE)
+                install.packages("adbcdrivermanager", repos="{cran_mirror}", quiet=TRUE)
             }}
             if (!requireNamespace("adbcsnowflake", quietly=TRUE)) {{
                 install.packages("adbcsnowflake", repos="https://community.r-multiverse.org")

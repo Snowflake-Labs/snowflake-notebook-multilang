@@ -1,0 +1,355 @@
+# Custom Package Mirrors (Artifactory / Nexus / Air-Gapped)
+
+Organizations in regulated industries (banking, insurance, healthcare,
+government) often require that all external packages pass through an
+internal artifact repository proxy before entering their network. This
+document explains how to configure `sfnb-multilang` to route every
+package download through a corporate mirror.
+
+## Background
+
+By default the toolkit downloads packages from public upstream sources:
+
+| Package type | Default source |
+|---|---|
+| conda (R runtime, pre-compiled R packages) | `conda.anaconda.org/conda-forge` |
+| pip (sfnb-multilang, nevergrad, ipywidgets) | `pypi.org` |
+| CRAN (R packages not on conda-forge) | `cloud.r-project.org` |
+| R tarballs (snowflakeR, RSnowflake) | `github.com` release assets |
+| micromamba binary | `micro.mamba.pm` / GitHub Releases |
+
+In a locked-down environment these public domains are blocked. An
+artifact repository proxy sits between the Snowflake Notebook and the
+internet, caching, scanning, and auditing every artifact.
+
+## Supported Repository Managers
+
+The `mirrors` configuration is **tool-agnostic**. It works with any
+artifact repository that speaks the standard protocol for each package
+manager:
+
+| Tool | Conda | PyPI | CRAN | Generic |
+|---|:---:|:---:|:---:|:---:|
+| **JFrog Artifactory** (Pro/Enterprise) | Yes | Yes | Yes | Yes |
+| **Sonatype Nexus** (OSS or Pro) | Yes | Yes | Yes | Yes |
+| **AWS CodeArtifact** | No | Yes | No | No |
+| **Azure Artifacts** | No | Yes | No | No |
+| **GitLab Package Registry** | No | Yes | No | No |
+| **GitHub Packages** | No | Yes | No | No |
+
+For full coverage of all five package types (conda, PyPI, CRAN, R
+tarballs, micromamba), **Artifactory Pro/Enterprise** or **Nexus** are
+recommended. Tools that lack Conda and CRAN support require alternative
+approaches (see [Partial Mirror Coverage](#partial-mirror-coverage)).
+
+## Configuration
+
+Add a `mirrors` section to your `_config.yaml`:
+
+```yaml
+mirrors:
+  conda_channel: "https://artifactory.snowflake.com/conda-forge-remote"
+  pypi_index: "https://artifactory.snowflake.com/api/pypi/pypi-remote/simple"
+  cran_mirror: "https://artifactory.snowflake.com/cran-remote"
+  micromamba_url: "https://artifactory.snowflake.com/generic-tools/micromamba/linux-64/latest"
+  ssl_cert_path: "/etc/ssl/certs/corporate-ca-bundle.crt"
+```
+
+All fields are optional. Omitted fields fall back to the public default.
+
+### Field Reference
+
+| Field | Protocol | Default | Description |
+|---|---|---|---|
+| `conda_channel` | Conda channel | `conda-forge` | URL to a Conda remote/virtual repo that proxies `conda-forge` |
+| `pypi_index` | PEP 503 Simple API | `https://pypi.org/simple` | URL to a PyPI remote repo |
+| `cran_mirror` | CRAN repo | `https://cloud.r-project.org` | URL to a CRAN remote repo |
+| `micromamba_url` | HTTP(S) binary download | `micro.mamba.pm` / GitHub | Direct URL to a micromamba binary or `.tar.bz2` archive |
+| `ssl_cert_path` | N/A | system default | Path to a CA certificate bundle for TLS inspection proxies |
+
+### Tarball URLs
+
+R packages distributed as GitHub release tarballs (snowflakeR,
+RSnowflake) are configured separately in the `tarballs` section.
+Point these at your artifact repository's generic repo:
+
+```yaml
+languages:
+  r:
+    tarballs:
+      snowflakeR: "https://artifactory.snowflake.com/generic-r/snowflakeR_0.1.0.tar.gz"
+      RSnowflake: "https://artifactory.snowflake.com/generic-r/RSnowflake_0.2.0.tar.gz"
+```
+
+## Complete Example
+
+A complete config for a fully mirrored environment:
+
+```yaml
+env_name: "workspace_env"
+
+mirrors:
+  conda_channel: "https://artifactory.snowflake.com/conda-forge-remote"
+  pypi_index: "https://artifactory.snowflake.com/api/pypi/pypi-remote/simple"
+  cran_mirror: "https://artifactory.snowflake.com/cran-remote"
+  micromamba_url: "https://artifactory.snowflake.com/generic-tools/micromamba/linux-64/latest"
+  ssl_cert_path: "/etc/ssl/certs/corporate-ca-bundle.crt"
+
+languages:
+  r:
+    enabled: true
+    r_version: "4.5.2"
+    conda_packages:
+      - r-tidyverse
+      - r-dbplyr
+      - r-reticulate>=1.25
+    cran_packages:
+      - lares
+      - Robyn
+    pip_packages:
+      - nevergrad
+    tarballs:
+      snowflakeR: "https://artifactory.snowflake.com/generic-r/snowflakeR_0.1.0.tar.gz"
+      RSnowflake: "https://artifactory.snowflake.com/generic-r/RSnowflake_0.2.0.tar.gz"
+```
+
+## EAI Simplification
+
+When mirrors are configured, the EAI domain list is automatically
+reduced to just the mirror host(s). Instead of the standard ~15 public
+domains, the generated EAI SQL contains only your artifact repository:
+
+```sql
+CREATE OR REPLACE NETWORK RULE MULTILANG_NOTEBOOK_EGRESS
+  MODE = EGRESS
+  TYPE = HOST_PORT
+  VALUE_LIST = (
+    'artifactory.snowflake.com'
+  );
+
+CREATE OR REPLACE EXTERNAL ACCESS INTEGRATION MULTILANG_NOTEBOOK_EAI
+  ALLOWED_NETWORK_RULES = (MULTILANG_NOTEBOOK_EGRESS)
+  ENABLED = TRUE;
+```
+
+This is a significant security improvement for regulated environments:
+one auditable endpoint instead of a dozen public domains.
+
+## Repository Setup Guide
+
+### What to Create
+
+Your artifact repository admin needs to create these repositories:
+
+| Repository | Type | Upstream | Contents |
+|---|---|---|---|
+| `conda-forge-remote` | Conda Remote | `https://conda.anaconda.org/conda-forge` | Auto-caching proxy; no manual uploads |
+| `pypi-remote` | PyPI Remote | `https://pypi.org` | Auto-caching proxy; no manual uploads |
+| `cran-remote` | CRAN Remote | `https://cloud.r-project.org` | Auto-caching proxy; no manual uploads |
+| `generic-r` | Generic (local) | N/A | Manual upload: `snowflakeR_*.tar.gz`, `RSnowflake_*.tar.gz` |
+| `generic-tools` | Generic (local) | N/A | Manual upload: `micromamba` binary |
+
+**Remote repositories** are auto-caching proxies. On the first request
+for a package, the repository fetches it from upstream, caches it
+locally, and serves it. Subsequent requests are served from cache. The
+security team can scan cached artifacts before allowing them into
+production.
+
+**Generic (local) repositories** require manual artifact uploads. These
+hold the four artifacts we distribute as direct URL downloads rather
+than through a standard package manager:
+
+| Artifact | Download from | Upload to |
+|---|---|---|
+| `snowflakeR_0.1.0.tar.gz` | [GitHub Releases](https://github.com/Snowflake-Labs/snowflakeR/releases) | `generic-r/` |
+| `RSnowflake_0.2.0.tar.gz` | [GitHub Releases](https://github.com/Snowflake-Labs/RSnowflake/releases) | `generic-r/` |
+| `micromamba` (linux-64) | [micro.mamba.pm](https://micro.mamba.pm/api/micromamba/linux-64/latest) | `generic-tools/micromamba/linux-64/latest` |
+
+### Artifactory-Specific Setup
+
+```bash
+# Create remote repos (Artifactory CLI)
+jf rt repo-create conda-forge-remote --repo-type remote \
+  --package-type conda --url https://conda.anaconda.org/conda-forge
+
+jf rt repo-create pypi-remote --repo-type remote \
+  --package-type pypi --url https://pypi.org
+
+jf rt repo-create cran-remote --repo-type remote \
+  --package-type cran --url https://cloud.r-project.org
+
+# Create generic local repos
+jf rt repo-create generic-r --repo-type local --package-type generic
+jf rt repo-create generic-tools --repo-type local --package-type generic
+
+# Upload artifacts
+jf rt upload snowflakeR_0.1.0.tar.gz generic-r/
+jf rt upload RSnowflake_0.2.0.tar.gz generic-r/
+jf rt upload micromamba generic-tools/micromamba/linux-64/latest
+```
+
+### Nexus-Specific Setup
+
+In the Nexus admin UI:
+
+1. **Repositories > Create repository**
+2. Choose `conda (proxy)`, set Remote URL to `https://conda.anaconda.org/conda-forge`
+3. Repeat for `pypi (proxy)` -> `https://pypi.org` and `r (proxy)` -> `https://cloud.r-project.org`
+4. Create `raw (hosted)` repositories for `generic-r` and `generic-tools`
+5. Upload artifacts via the Nexus UI or `curl`
+
+## TLS Inspection (ssl_cert_path)
+
+Banks and regulated organizations commonly use TLS inspection (also
+called SSL interception or MITM proxying) for Data Loss Prevention.
+Corporate proxies terminate and re-encrypt TLS traffic using an
+internal CA certificate. Standard CA bundles do not include this
+internal CA, so HTTPS requests from the Notebook container will fail
+with certificate verification errors.
+
+Set `ssl_cert_path` to your organization's CA bundle:
+
+```yaml
+mirrors:
+  ssl_cert_path: "/etc/ssl/certs/corporate-ca-bundle.crt"
+```
+
+This certificate is used by:
+- **micromamba** (`--ssl-verify` flag) for conda package downloads
+- **pip** (`--cert` flag) for PyPI package downloads
+- **urllib** (Python `ssl.create_default_context`) for tarball downloads
+
+For CRAN packages, R uses its own SSL stack. If your CRAN mirror also
+requires a custom CA certificate, set the R environment variable in a
+setup cell before calling `setup_notebook()`:
+
+```python
+import os
+os.environ["CURL_CA_BUNDLE"] = "/etc/ssl/certs/corporate-ca-bundle.crt"
+```
+
+## Zero-Code-Change Alternative
+
+If modifying the config YAML is not practical, the same result can be
+achieved via standard configuration files that each package manager
+reads automatically. These go in the Workspace container's home
+directory or are set as environment variables.
+
+### .condarc (conda/micromamba)
+
+```yaml
+channels:
+  - https://artifactory.snowflake.com/conda-forge-remote
+default_channels:
+  - https://artifactory.snowflake.com/conda-forge-remote
+ssl_verify: /etc/ssl/certs/corporate-ca-bundle.crt
+```
+
+### pip.conf (pip)
+
+```ini
+[global]
+index-url = https://artifactory.snowflake.com/api/pypi/pypi-remote/simple
+cert = /etc/ssl/certs/corporate-ca-bundle.crt
+trusted-host = artifactory.snowflake.com
+```
+
+### .Rprofile (CRAN)
+
+```r
+options(repos = c(CRAN = "https://artifactory.snowflake.com/cran-remote"))
+```
+
+The YAML `mirrors` config is preferred because it is portable, version-
+controlled, and visible to the EAI domain generator. The dotfile
+approach works but the EAI must be configured manually.
+
+## Partial Mirror Coverage
+
+If your artifact repository does not support all five package types
+(e.g. AWS CodeArtifact supports PyPI but not Conda or CRAN), you can
+mix mirrored and direct access:
+
+```yaml
+mirrors:
+  # Only PyPI goes through CodeArtifact
+  pypi_index: "https://my-domain-123456789.d.codeartifact.us-east-1.amazonaws.com/pypi/pypi-store/simple/"
+  # conda and CRAN still use public defaults (require EAI domains)
+```
+
+In this case, the EAI will include both the CodeArtifact domain and
+the public conda-forge/CRAN domains. Only fully mirrored package types
+have their public domains removed from the EAI.
+
+## Troubleshooting
+
+### "SSL: CERTIFICATE_VERIFY_FAILED"
+
+Your organization uses TLS inspection. Set `ssl_cert_path` to the
+corporate CA bundle. Ask your IT team for the path -- common locations:
+
+- `/etc/ssl/certs/ca-certificates.crt` (Debian/Ubuntu)
+- `/etc/pki/tls/certs/ca-bundle.crt` (RHEL/CentOS)
+- `/etc/ssl/cert.pem` (macOS)
+
+### "Could not find a version that satisfies the requirement"
+
+The PyPI mirror may not have the package cached yet. Verify the mirror
+URL is correct and that the mirror has upstream access to `pypi.org`.
+Test from a machine with direct access:
+
+```bash
+pip install --index-url https://artifactory.snowflake.com/api/pypi/pypi-remote/simple nevergrad
+```
+
+### "403 Forbidden" or "Access denied" from mirror
+
+This typically means the package **has** been cached by the mirror but
+was **blocked by a security scanning policy** (e.g. Artifactory Xray,
+Nexus IQ Server, or a manual approval gate). This is distinct from a
+"not found" error -- the artifact exists but your repository's security
+policy is preventing download.
+
+Common causes:
+
+- **Vulnerability scan pending:** The artifact was pulled into the
+  cache but the async security scan hasn't completed yet. Some
+  organizations configure a quarantine period during which artifacts
+  are not served. Wait for the scan to complete or ask your IT team
+  to check the scan queue.
+- **Vulnerability policy violation:** The scan completed and found a
+  CVE that exceeds your organization's severity threshold. Your IT
+  team needs to either approve an exception or you need to find an
+  alternative package version without the flagged vulnerability.
+- **License policy violation:** The package's license (e.g. GPL,
+  AGPL) is on your organization's blocklist. This requires a license
+  exception from your legal/compliance team.
+- **Unsigned or unverified artifact:** Some policies block packages
+  that lack signatures or provenance metadata.
+
+To diagnose, check the artifact status in your repository manager's
+UI (Artifactory: Application > Security & Compliance > Watch Violations;
+Nexus: IQ Server > Reports) or ask your IT team to check the block
+reason for the specific package.
+
+### "Package not found" from conda
+
+The conda channel URL may be incorrect. Conda remote repos in
+Artifactory use the path `/<repo-key>` directly, not the Artifactory
+API path. Verify:
+
+```bash
+# Correct
+conda_channel: "https://artifactory.snowflake.com/conda-forge-remote"
+
+# Wrong (API path)
+conda_channel: "https://artifactory.snowflake.com/api/conda/conda-forge-remote"
+```
+
+### micromamba download fails
+
+If `micromamba_url` is not set or the URL is unreachable, the toolkit
+falls back to the standard download strategies (micro.mamba.pm, GitHub
+Releases). If all strategies fail, pre-install micromamba in the
+container image or download it manually and place it at
+`~/micromamba/bin/micromamba`.

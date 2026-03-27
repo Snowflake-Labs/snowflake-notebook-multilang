@@ -26,6 +26,18 @@
 #   managed: "MY_EAI"
 #   supplementary_name: "MULTILANG_NOTEBOOK_EAI"
 
+# -- Custom mirrors (Artifactory / Nexus / air-gapped environments) -----------
+# Uncomment and set these to route all package downloads through your
+# internal artifact repository proxy. Works with JFrog Artifactory,
+# Sonatype Nexus, AWS CodeArtifact, or any standard proxy.
+#
+# mirrors:
+#   conda_channel: "https://artifactory.example.com/conda-forge-remote"
+#   pypi_index: "https://artifactory.example.com/api/pypi/pypi-remote/simple"
+#   cran_mirror: "https://artifactory.example.com/cran-remote"
+#   micromamba_url: "https://artifactory.example.com/generic-tools/micromamba/linux-64/latest"
+#   ssl_cert_path: "/etc/ssl/certs/corporate-ca-bundle.crt"
+
 # -- Language and package spec ------------------------------------------------
 env_name: "workspace_env"
 

@@ -127,12 +127,79 @@ def _download_urllib(binary_path: str) -> str:
     return binary_path
 
 
+def _download_custom_url(binary_path: str, url: str, ssl_cert_path: str = "") -> str:
+    """Download micromamba from a custom URL (Artifactory / Nexus / etc.).
+
+    Supports both raw binaries and bzip2 archives (auto-detected by URL
+    suffix or content).  For corporate environments with TLS inspection,
+    pass ssl_cert_path to a custom CA bundle.
+    """
+    import urllib.request
+    import ssl
+
+    logger.info("Downloading micromamba from custom URL: %s ...", url)
+
+    if ssl_cert_path and os.path.isfile(ssl_cert_path):
+        ctx = ssl.create_default_context(cafile=ssl_cert_path)
+    else:
+        ctx = None
+
+    with tempfile.NamedTemporaryFile(delete=False) as tmp:
+        tmp_path = tmp.name
+
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "sfnb-multilang"})
+        kwargs = {"timeout": 120}
+        if ctx:
+            kwargs["context"] = ctx
+        with urllib.request.urlopen(req, **kwargs) as resp:
+            with open(tmp_path, "wb") as f:
+                while True:
+                    chunk = resp.read(65536)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+
+        size = os.path.getsize(tmp_path)
+
+        if url.endswith((".tar.bz2", ".bz2")):
+            target_dir = os.path.dirname(os.path.dirname(binary_path))
+            if size < MIN_ARCHIVE_BYTES:
+                raise RuntimeError(
+                    f"Downloaded archive too small ({size} bytes); "
+                    f"expected >{MIN_ARCHIVE_BYTES}"
+                )
+            run_cmd(
+                ["tar", "-xjf", tmp_path, "-C", target_dir, "bin/micromamba"],
+                description="Extract micromamba from custom archive",
+            )
+        else:
+            if size < MIN_BINARY_BYTES:
+                raise RuntimeError(
+                    f"Downloaded binary too small ({size} bytes); "
+                    f"expected >{MIN_BINARY_BYTES}"
+                )
+            os.replace(tmp_path, binary_path)
+            tmp_path = None
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+
+    _make_executable(binary_path)
+    return binary_path
+
+
 @retry(max_attempts=3, delay=5)
-def download_micromamba(target_dir: str) -> str:
+def download_micromamba(
+    target_dir: str,
+    custom_url: str = "",
+    ssl_cert_path: str = "",
+) -> str:
     """Download the micromamba binary to target_dir/bin/micromamba.
 
-    Tries three strategies in order:
-      1. bzip2 archive from micro.mamba.pm (download to file, then extract)
+    If custom_url is provided (e.g. an Artifactory generic repo), it is
+    tried first.  Otherwise falls back to the standard strategies:
+      1. bzip2 archive from micro.mamba.pm
       2. Standalone binary from GitHub Releases via curl
       3. Standalone binary from GitHub Releases via Python urllib
     """
@@ -140,11 +207,17 @@ def download_micromamba(target_dir: str) -> str:
     os.makedirs(bin_dir, exist_ok=True)
     binary_path = os.path.join(bin_dir, "micromamba")
 
-    strategies = [
+    strategies: list[tuple[str, object]] = []
+    if custom_url:
+        strategies.append((
+            "custom-url",
+            lambda: _download_custom_url(binary_path, custom_url, ssl_cert_path),
+        ))
+    strategies.extend([
         ("archive", lambda: _download_via_archive(target_dir, binary_path)),
         ("github-curl", lambda: _download_standalone(binary_path)),
         ("github-urllib", lambda: _download_urllib(binary_path)),
-    ]
+    ])
 
     last_exc: Exception | None = None
     for name, fn in strategies:
@@ -161,12 +234,20 @@ def download_micromamba(target_dir: str) -> str:
     ) from last_exc
 
 
-def ensure_micromamba(root: str, force: bool = False) -> str:
+def ensure_micromamba(
+    root: str,
+    force: bool = False,
+    custom_url: str = "",
+    ssl_cert_path: str = "",
+) -> str:
     """Return path to micromamba binary, downloading if needed.
 
     Args:
         root: Directory where micromamba lives (contains bin/micromamba).
         force: Re-download even if already present.
+        custom_url: Optional URL to download micromamba from (e.g.
+            an Artifactory/Nexus generic repo).
+        ssl_cert_path: Path to a custom CA cert bundle for TLS inspection.
 
     Returns:
         Absolute path to the micromamba binary.
@@ -178,4 +259,4 @@ def ensure_micromamba(root: str, force: bool = False) -> str:
         logger.info("micromamba already installed (skipping)")
         return binary
 
-    return download_micromamba(root)
+    return download_micromamba(root, custom_url=custom_url, ssl_cert_path=ssl_cert_path)

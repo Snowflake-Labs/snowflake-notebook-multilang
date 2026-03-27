@@ -8,33 +8,56 @@ be configured first.
 ## setup_notebook() (Recommended)
 
 When using `setup_notebook()` from `sfnb_setup.py`, EAI management is
-fully automatic. It discovers existing EAIs, checks for required domains,
-and adds any that are missing.
+privilege-aware. It discovers existing EAIs, checks for required domains,
+and -- **only if the current role has sufficient privileges** -- adds any
+that are missing. If the role cannot ALTER or CREATE, the toolkit prints
+the exact SQL needed so an administrator can run it instead.
+
+No changes are made that exceed the caller's granted privileges.
 
 ### Multi-tier EAI discovery
 
-`setup_notebook()` discovers attached EAIs via multiple tiers (first
-match wins):
+`setup_notebook()` selects the target EAI using the following priority
+(first match wins):
 
-1. **`DESC SERVICE`** -- In non-interactive/scheduled runs where
+1. **`eai.managed` in YAML config** -- If the user specifies
+   `eai: { managed: MY_EAI_NAME }` in the config file, that EAI is used
+   as the target. This is the recommended approach when an admin has
+   pre-created an EAI for the team.
+2. **Convention name** -- If no managed name is specified, the toolkit
+   looks for an EAI matching the default supplementary name
+   (`MULTILANG_NOTEBOOK_EAI`).
+3. **`DESC SERVICE`** -- In non-interactive/scheduled runs where
    `SNOWFLAKE_SERVICE_NAME` is set, this returns the exact EAIs attached
    to the running service.
-2. **`.snowflake/settings.json`** -- Best-effort hint from the Workspace
+4. **`.snowflake/settings.json`** -- Best-effort hint from the Workspace
    control plane (not guaranteed to exist).
-3. **`SHOW EXTERNAL ACCESS INTEGRATIONS`** -- All EAIs visible to the
-   current role.
+5. **`SHOW EXTERNAL ACCESS INTEGRATIONS`** -- All enabled EAIs visible
+   to the current role.
+
+The toolkit does **not** iterate through all visible EAIs trying each
+one -- it selects a single target based on the priority above and
+operates on that one EAI only.
 
 ### Hybrid EAI management (Hybrid D strategy)
 
-When domains are missing:
+When domains are missing from the selected target EAI:
 
-- **Managed EAI specified** (`eai.managed` in config): The existing EAI's
-  network rule is altered via `ALTER NETWORK RULE` to add missing domains.
-- **No managed EAI**: A supplementary EAI is created (default name:
-  `MULTILANG_NOTEBOOK_EAI`) with only the missing domains.
-- **Insufficient privileges**: The complete SQL is printed with annotated
-  domain coverage (showing which domains are already covered by other EAIs)
-  so the user or admin can run it manually.
+- **Managed EAI specified** (`eai.managed` in config): The toolkit
+  attempts `ALTER NETWORK RULE` on the EAI's existing network rule to
+  add the missing domains. If the ALTER succeeds, it re-tests DNS
+  resolution to confirm the change is live.
+- **ALTER fails** (insufficient privileges on the managed EAI): The
+  toolkit falls back to creating a supplementary EAI with only the
+  missing domains.
+- **No managed EAI found**: The toolkit first tests DNS reachability of
+  the required domains. If all resolve (some other EAI already covers
+  them), it returns immediately. If domains are unreachable, it attempts
+  to CREATE a supplementary EAI (default: `MULTILANG_NOTEBOOK_EAI`).
+- **CREATE fails** (insufficient privileges): The complete SQL is
+  printed with annotated domain coverage -- showing which domains are
+  already covered by other EAIs and which are new -- so the user or
+  admin can run it with `ACCOUNTADMIN`.
 
 ### Open EAI detection
 
@@ -132,6 +155,22 @@ sfnb-setup generate-eai --config config.yaml --output eai_setup.sql
 server redirect chain (`pkg.julialang.org` -> `storage.julialang.net`)
 which has known SPCS DNS issues. All packages are cloned via Git from
 `github.com` instead.
+
+## Custom Mirrors (Artifactory / Nexus)
+
+If your organization routes all package downloads through an internal
+artifact repository, the EAI can be simplified to a single domain.
+See [custom_mirrors.md](custom_mirrors.md) for full setup instructions.
+
+When `mirrors` is configured in the YAML config, `_domains_from_config()`
+automatically replaces the public upstream domains with just the mirror
+host(s). For example, setting `conda_channel`, `pypi_index`, and
+`cran_mirror` all pointing to `artifactory.snowflake.com` reduces the
+EAI to:
+
+```sql
+VALUE_LIST = ('artifactory.snowflake.com')
+```
 
 ## Dynamic Application
 

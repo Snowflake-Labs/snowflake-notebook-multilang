@@ -183,6 +183,8 @@ install(config="config.yaml")
 
 ## CLI Usage
 
+See [cli.md](cli.md) for the full CLI reference.
+
 From a `!` shell cell or terminal:
 
 ```bash

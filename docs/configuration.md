@@ -104,6 +104,23 @@ setup_notebook(packages=["snowflakeR"])
 | `juliacall.threads` | `"auto"` | Julia thread count |
 | `juliacall.optimize` | `2` | Julia optimization level |
 
+## Custom Mirrors (`mirrors`)
+
+Route package downloads through an internal artifact repository (JFrog
+Artifactory, Sonatype Nexus, etc.). See [custom_mirrors.md](custom_mirrors.md)
+for full setup instructions.
+
+| Key | Default | Description |
+|---|---|---|
+| `conda_channel` | `conda-forge` | Conda channel URL (Artifactory/Nexus conda remote) |
+| `pypi_index` | `pypi.org` | PyPI index URL (`--index-url` for pip) |
+| `cran_mirror` | `cloud.r-project.org` | CRAN mirror URL for `install.packages()` |
+| `micromamba_url` | `micro.mamba.pm` | Direct URL for micromamba binary download |
+| `ssl_cert_path` | system CA bundle | Path to CA cert bundle for TLS inspection proxies |
+
+When mirrors are configured, the EAI domain list is automatically
+reduced to just the mirror host(s).
+
 ## Network Rules (`network_rule`)
 
 | Key | Default | Description |
@@ -112,7 +129,7 @@ setup_notebook(packages=["snowflakeR"])
 | `account` | `""` | Snowflake account (auto-detected if empty) |
 | `rule_name` | `multilang_notebook_egress` | Network rule name |
 | `integration_name` | `multilang_notebook_eai` | EAI name |
-| `grant_to_role` | `""` | Optional role to GRANT USAGE to |
+| `grant_to_role` | `""` | Role to `GRANT USAGE ON INTEGRATION` to (allows that role to attach the EAI to notebooks) |
 | `sql_export_path` | `./eai_setup.sql` | File path for SQL on failure |
 
 ## Logging (`logging`)
@@ -124,6 +141,9 @@ setup_notebook(packages=["snowflakeR"])
 | `json_format` | `false` | Use JSON format for file logs |
 
 ## CLI Flag Overrides
+
+See [cli.md](cli.md) for the full CLI reference (subcommands, examples, and
+a comparison with `setup_notebook()`).
 
 CLI flags override YAML values:
 

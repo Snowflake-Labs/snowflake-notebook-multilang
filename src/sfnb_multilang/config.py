@@ -81,6 +81,22 @@ class JuliaConfig:
 
 
 @dataclass
+class MirrorsConfig:
+    """Custom mirror URLs for air-gapped / Artifactory / Nexus environments.
+
+    When set, these override the default public URLs for package downloads.
+    Works with any artifact repository proxy (JFrog Artifactory, Sonatype
+    Nexus, AWS CodeArtifact, etc.) -- the URLs just need to speak the
+    standard protocol for each package manager.
+    """
+    conda_channel: str = ""
+    pypi_index: str = ""
+    cran_mirror: str = ""
+    micromamba_url: str = ""
+    ssl_cert_path: str = ""
+
+
+@dataclass
 class NetworkRuleConfig:
     apply_in_installer: bool = True
     account: str = ""
@@ -106,6 +122,7 @@ class ToolkitConfig:
     r: RConfig = field(default_factory=RConfig)
     scala: ScalaConfig = field(default_factory=ScalaConfig)
     julia: JuliaConfig = field(default_factory=JuliaConfig)
+    mirrors: MirrorsConfig = field(default_factory=MirrorsConfig)
     network_rule: NetworkRuleConfig = field(default_factory=NetworkRuleConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
 
@@ -231,6 +248,16 @@ def _build_config(raw: dict) -> ToolkitConfig:
         julia_raw = {}
     cfg.julia = _merge_julia(julia_raw)
 
+    # Mirrors config (Artifactory / Nexus / air-gapped environments)
+    mir_raw = raw.get("mirrors", {}) or {}
+    cfg.mirrors = MirrorsConfig(
+        conda_channel=str(mir_raw.get("conda_channel", "")),
+        pypi_index=str(mir_raw.get("pypi_index", "")),
+        cran_mirror=str(mir_raw.get("cran_mirror", "")),
+        micromamba_url=str(mir_raw.get("micromamba_url", "")),
+        ssl_cert_path=str(mir_raw.get("ssl_cert_path", "")),
+    )
+
     # Network rule config
     nr_raw = raw.get("network_rule", {}) or {}
     cfg.network_rule = NetworkRuleConfig(
@@ -288,6 +315,13 @@ def config_to_dict(cfg: ToolkitConfig) -> dict:
                 "sysimage": cfg.julia.sysimage,
                 "juliacall": cfg.julia.juliacall,
             },
+        },
+        "mirrors": {
+            "conda_channel": cfg.mirrors.conda_channel,
+            "pypi_index": cfg.mirrors.pypi_index,
+            "cran_mirror": cfg.mirrors.cran_mirror,
+            "micromamba_url": cfg.mirrors.micromamba_url,
+            "ssl_cert_path": cfg.mirrors.ssl_cert_path,
         },
         "network_rule": {
             "apply_in_installer": cfg.network_rule.apply_in_installer,

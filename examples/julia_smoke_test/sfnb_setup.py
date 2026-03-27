@@ -94,10 +94,37 @@ def _find_log_path():
 
 
 # ==========================================================================
-# Section 1b: Pre-warm heavy ML imports
+# Section 1b: Mirrors config helpers
 # ==========================================================================
 
-def _prewarm_ml_imports(quiet: bool = False):
+def _get_mirrors(cfg: dict) -> dict:
+    """Extract mirrors section from parsed YAML config."""
+    raw = cfg.get("mirrors", {}) or {}
+    return {
+        "conda_channel": str(raw.get("conda_channel", "")),
+        "pypi_index": str(raw.get("pypi_index", "")),
+        "cran_mirror": str(raw.get("cran_mirror", "")),
+        "micromamba_url": str(raw.get("micromamba_url", "")),
+        "ssl_cert_path": str(raw.get("ssl_cert_path", "")),
+    }
+
+
+def _pip_index_flags(mirrors: dict) -> list[str]:
+    """Build pip --index-url / --cert flags from mirrors config."""
+    flags: list[str] = []
+    if mirrors.get("pypi_index"):
+        flags += ["--index-url", mirrors["pypi_index"]]
+    cert = mirrors.get("ssl_cert_path", "")
+    if cert and os.path.isfile(cert):
+        flags += ["--cert", cert]
+    return flags
+
+
+# ==========================================================================
+# Section 1c: Pre-warm heavy ML imports
+# ==========================================================================
+
+def _prewarm_ml_imports(quiet: bool = False, mirrors: dict | None = None):
     """Pre-import heavy snowflake-ml modules so first user cell is fast.
 
     The first ``from snowflake.ml.feature_store import FeatureStore`` triggers
@@ -111,8 +138,10 @@ def _prewarm_ml_imports(quiet: bool = False):
     try:
         import importlib.util
         if importlib.util.find_spec("ipywidgets") is None:
+            pip_flags = _pip_index_flags(mirrors or {})
             subprocess.check_call(
-                [sys.executable, "-m", "pip", "install", "-q", "ipywidgets"],
+                [sys.executable, "-m", "pip", "install", "-q", "ipywidgets"]
+                + pip_flags,
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             )
     except Exception:
@@ -209,7 +238,33 @@ DEFAULT_RULE_NAME = "MULTILANG_NOTEBOOK_EGRESS"
 
 
 def _domains_from_config(cfg: dict) -> set[str]:
-    """Derive required EAI domains from a parsed YAML config."""
+    """Derive required EAI domains from a parsed YAML config.
+
+    When custom mirrors are configured, the public upstream domains are
+    replaced with the mirror host(s).  This dramatically simplifies the
+    EAI for air-gapped / Artifactory / Nexus environments.
+    """
+    mirrors = _get_mirrors(cfg)
+    has_mirrors = any(mirrors.get(k) for k in (
+        "conda_channel", "pypi_index", "cran_mirror", "micromamba_url"))
+
+    if has_mirrors:
+        domains: set[str] = set()
+        for key in ("conda_channel", "pypi_index", "cran_mirror", "micromamba_url"):
+            url = mirrors.get(key, "")
+            if url:
+                host = url.split("//", 1)[-1].split("/", 1)[0].split(":")[0]
+                if host:
+                    domains.add(host)
+        # Tarballs may also point to the mirror
+        tarballs = cfg.get("languages", {}).get("r", {}).get("tarballs", {}) or {}
+        for url in tarballs.values():
+            if isinstance(url, str) and url.startswith(("http://", "https://")):
+                host = url.split("//", 1)[-1].split("/", 1)[0].split(":")[0]
+                if host:
+                    domains.add(host)
+        return domains
+
     domains = set(SHARED_DOMAINS + TOOLKIT_DOMAINS)
     langs = cfg.get("languages", {})
 
@@ -848,6 +903,35 @@ def _find_local_src():
     return None
 
 
+def _find_config_yaml() -> str | None:
+    """Find a *_config.yaml next to this script (best-effort for bootstrap)."""
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    import glob as _glob
+    candidates = sorted(_glob.glob(os.path.join(script_dir, "*_config.yaml")))
+    return candidates[0] if candidates else None
+
+
+def _build_eai_sql(domains: set[str]) -> str:
+    """Build CREATE NETWORK RULE + EAI SQL from a set of domains."""
+    host_list = "\n".join(
+        f"      '{d}'," if i < len(sorted(domains)) - 1 else f"      '{d}'"
+        for i, d in enumerate(sorted(domains))
+    )
+    return (
+        f"  CREATE OR REPLACE NETWORK RULE {DEFAULT_RULE_NAME}\n"
+        f"    MODE = EGRESS\n"
+        f"    TYPE = HOST_PORT\n"
+        f"    VALUE_LIST = (\n"
+        f"{host_list}\n"
+        f"    );\n"
+        f"\n"
+        f"  CREATE OR REPLACE EXTERNAL ACCESS INTEGRATION\n"
+        f"    {DEFAULT_SUPPLEMENTARY_NAME}\n"
+        f"    ALLOWED_NETWORK_RULES = ({DEFAULT_RULE_NAME})\n"
+        f"    ENABLED = TRUE;"
+    )
+
+
 def _bootstrap():
     root = _detect_monorepo()
     if root:
@@ -871,6 +955,12 @@ def _bootstrap():
             if local_src not in sys.path:
                 sys.path.insert(0, local_src)
         else:
+            # Check for custom PyPI mirror from any config YAML nearby
+            _boot_cfg_path = _find_config_yaml()
+            _boot_cfg = _read_config(_boot_cfg_path) if _boot_cfg_path else {}
+            _boot_mirrors = _get_mirrors(_boot_cfg)
+            _boot_pip_flags = _pip_index_flags(_boot_mirrors)
+
             _GITHUB_URL = (
                 "sfnb-multilang @ https://github.com/Snowflake-Labs/"
                 "snowflake-notebook-multilang/archive/refs/heads/main.zip"
@@ -878,8 +968,13 @@ def _bootstrap():
             try:
                 subprocess.check_call(
                     [sys.executable, "-m", "pip", "install", "-q",
-                     _GITHUB_URL])
+                     _GITHUB_URL] + _boot_pip_flags)
             except subprocess.CalledProcessError:
+                cfg_path = _find_config_yaml()
+                cfg = _read_config(cfg_path) if cfg_path else {}
+                domains = _domains_from_config(cfg)
+                eai_sql = _build_eai_sql(domains)
+
                 print(
                     "\n"
                     "============================================================\n"
@@ -893,35 +988,18 @@ def _bootstrap():
                     "  not have an External Access Integration (EAI) attached.\n"
                     "\n"
                     "  To fix this, run the following SQL in a Snowflake\n"
-                    "  worksheet (or a SQL cell in another notebook that\n"
-                    "  already has network access):\n"
+                    "  worksheet or any SQL cell:\n"
                     "\n"
                     "  ---- copy from here ----\n"
                     "\n"
-                    "  CREATE OR REPLACE NETWORK RULE MULTILANG_EGRESS\n"
-                    "    MODE = EGRESS\n"
-                    "    TYPE = HOST_PORT\n"
-                    "    VALUE_LIST = (\n"
-                    "      'github.com',\n"
-                    "      'objects.githubusercontent.com',\n"
-                    "      'release-assets.githubusercontent.com',\n"
-                    "      'pypi.org',\n"
-                    "      'files.pythonhosted.org',\n"
-                    "      'cloud.r-project.org',\n"
-                    "      'bioconductor.org'\n"
-                    "    );\n"
-                    "\n"
-                    "  CREATE OR REPLACE EXTERNAL ACCESS INTEGRATION\n"
-                    "    MULTILANG_NOTEBOOK_EAI\n"
-                    "    ALLOWED_NETWORK_RULES = (MULTILANG_EGRESS)\n"
-                    "    ENABLED = TRUE;\n"
+                    f"{eai_sql}\n"
                     "\n"
                     "  ---- copy to here ----\n"
                     "\n"
                     "  Then:\n"
                     "    1. Open your Notebook in Snowsight\n"
                     "    2. Click  ...  > Notebook settings > External access\n"
-                    "    3. Toggle MULTILANG_NOTEBOOK_EAI on\n"
+                    f"    3. Toggle {DEFAULT_SUPPLEMENTARY_NAME} on\n"
                     "    4. Restart the kernel and re-run this cell\n"
                     "\n"
                     "  Alternatively, create your Workspace from the\n"
@@ -964,13 +1042,26 @@ _GITHUB_FALLBACKS = {
 }
 
 
-def _resolve_tarball(pkg: str, src: str | None, quiet: bool = False) -> str | None:
+def _resolve_tarball(
+    pkg: str,
+    src: str | None,
+    quiet: bool = False,
+    ssl_cert_path: str = "",
+) -> str | None:
     if src:
         if src.startswith(("http://", "https://")):
             dest = os.path.join(tempfile.gettempdir(), os.path.basename(src))
             _log(f"  {pkg}: downloading {src}", quiet=quiet)
             try:
-                urllib.request.urlretrieve(src, dest)
+                if ssl_cert_path and os.path.isfile(ssl_cert_path):
+                    import ssl
+                    ctx = ssl.create_default_context(cafile=ssl_cert_path)
+                    req = urllib.request.Request(src)
+                    with urllib.request.urlopen(req, context=ctx) as resp:
+                        with open(dest, "wb") as f:
+                            f.write(resp.read())
+                else:
+                    urllib.request.urlretrieve(src, dest)
                 return dest
             except Exception as exc:
                 _log(f"  {pkg}: URL download failed ({exc}), "
@@ -994,10 +1085,10 @@ def _r_install(path: str):
     R(f'install.packages("{path}", repos = NULL, type = "source")')
 
 
-def _r_pak_install(repo: str):
+def _r_pak_install(repo: str, cran_mirror: str = "https://cloud.r-project.org"):
     from rpy2.robjects import r as R
-    R('options(repos = c(CRAN = "https://cloud.r-project.org"), '
-      'pkg.sysreqs = FALSE)')
+    R(f'options(repos = c(CRAN = "{cran_mirror}"), '
+      f'pkg.sysreqs = FALSE)')
     R('if (!requireNamespace("pak", quietly = TRUE)) '
       'install.packages("pak", type = "source", quiet = TRUE)')
     R(f'pak::pak("{repo}", ask = FALSE, upgrade = FALSE)')
@@ -1021,6 +1112,11 @@ def install_r_packages(
         packages = ["snowflakeR", "RSnowflake"]
 
     cfg = _read_config(config)
+    mirrors = _get_mirrors(cfg)
+    cran_mirror = mirrors.get("cran_mirror") or "https://cloud.r-project.org"
+    ssl_cert = mirrors.get("ssl_cert_path", "")
+    pip_flags = _pip_index_flags(mirrors)
+
     tarballs: dict[str, str] = (
         cfg.get("languages", {}).get("r", {}).get("tarballs")
     ) or {}
@@ -1029,18 +1125,18 @@ def install_r_packages(
     extras = [p for p in tarballs if p not in packages]
 
     for pkg in core:
-        path = _resolve_tarball(pkg, tarballs.get(pkg), quiet=quiet)
+        path = _resolve_tarball(pkg, tarballs.get(pkg), quiet=quiet, ssl_cert_path=ssl_cert)
         if path:
             _log(f"  {pkg} <- {path}", quiet=quiet)
             _r_install(path)
         elif pkg in _GITHUB_FALLBACKS:
             _log(f"  {pkg}: no tarball -- falling back to GitHub", quiet=quiet)
-            _r_pak_install(_GITHUB_FALLBACKS[pkg])
+            _r_pak_install(_GITHUB_FALLBACKS[pkg], cran_mirror=cran_mirror)
         else:
             _log(f"  {pkg}: WARNING could not resolve", quiet=quiet)
 
     for pkg in extras:
-        path = _resolve_tarball(pkg, tarballs.get(pkg), quiet=quiet)
+        path = _resolve_tarball(pkg, tarballs.get(pkg), quiet=quiet, ssl_cert_path=ssl_cert)
         if path:
             _log(f"  {pkg} <- {path}", quiet=quiet)
             _r_install(path)
@@ -1048,15 +1144,21 @@ def install_r_packages(
             _log(f"  {pkg}: WARNING could not resolve tarball", quiet=quiet)
 
     # Install pip packages required by R packages (e.g. nevergrad for Robyn)
+    # Skip packages already installed by Phase 4 of the toolkit installer.
     pip_pkgs: list = (
         cfg.get("languages", {}).get("r", {}).get("pip_packages")
     ) or []
     if pip_pkgs:
-        _log("\nPip packages (R dependencies):", quiet=quiet)
-        for pip_pkg in pip_pkgs:
-            _log(f"  pip install {pip_pkg}", quiet=quiet)
-            subprocess.check_call(
-                [sys.executable, "-m", "pip", "install", "-q", pip_pkg])
+        import importlib.util
+        missing = [p for p in pip_pkgs
+                   if importlib.util.find_spec(p.split("[")[0]) is None]
+        if missing:
+            _log("\nPip packages (R dependencies):", quiet=quiet)
+            for pip_pkg in missing:
+                _log(f"  pip install {pip_pkg}", quiet=quiet)
+                subprocess.check_call(
+                    [sys.executable, "-m", "pip", "install", "-q", pip_pkg]
+                    + pip_flags)
 
     _log("\nInstalled versions:", quiet=quiet)
     for pkg in core + extras:
@@ -1095,11 +1197,28 @@ def setup_notebook(
     t0 = time.monotonic()
 
     cfg = _read_config(config)
+    mirrors = _get_mirrors(cfg)
+    if any(mirrors.get(k) for k in ("conda_channel", "pypi_index", "cran_mirror")):
+        _log("Custom mirrors configured:", quiet=quiet)
+        for k, v in mirrors.items():
+            if v:
+                _log(f"  {k}: {v}", quiet=quiet)
 
     # -- 1. Session context ------------------------------------------------
     from snowflake.snowpark.context import get_active_session
     session = get_active_session()
     effective_ctx = _set_session_context(session, cfg, quiet=quiet)
+
+    # -- 1b. Query tracker (implicit cross-language query ID capture) ------
+    try:
+        try:
+            from sfnb_multilang.helpers.query_tracker import install_query_tracker
+        except ImportError:
+            from query_tracker import install_query_tracker
+        install_query_tracker(session)
+        _log("  Query tracker: installed", quiet=quiet)
+    except Exception as exc:
+        _log(f"  Query tracker: skipped ({exc})", quiet=quiet)
 
     # -- 2. EAI validation -------------------------------------------------
     _log("\n--- EAI validation ---", quiet=quiet)
@@ -1139,7 +1258,7 @@ def setup_notebook(
             _log(f"  R packages: {time.monotonic() - t_pkg:.0f}s", quiet=quiet)
 
             # Pre-warm heavy ML imports so first user cell isn't slow
-            _prewarm_ml_imports(quiet=quiet)
+            _prewarm_ml_imports(quiet=quiet, mirrors=mirrors)
 
             # Set SPCS OAuth env vars for RSnowflake DBI connectivity
             pkgs = packages or ["snowflakeR", "RSnowflake"]

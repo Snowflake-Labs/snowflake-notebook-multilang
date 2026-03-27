@@ -1,0 +1,40 @@
+# =============================================================================
+# Query Tracker Test -- Combined Dependencies
+# =============================================================================
+# Config for testing cross-language query ID capture and RESULT_SCAN reuse.
+#
+# Usage (single cell):
+#   from sfnb_setup import setup_notebook
+#   setup_notebook(config="query_tracker_test_config.yaml", packages=["snowflakeR"])
+# =============================================================================
+
+env_name: "workspace_env"
+
+languages:
+  r:
+    enabled: true
+    r_version: "4.5.2"
+    conda_packages:
+      - r-cli
+      - r-rlang>=1.0.0
+      - r-reticulate>=1.25
+      - r-tidyverse
+      - r-dbplyr
+      - r-httr2>=1.0.0
+      - r-lazyeval
+      - r-dbi>=1.2.0
+      - r-jsonlite
+      - r-dplyr>=1.1.0
+    cran_packages: []
+    addons:
+      adbc: false
+      duckdb: false
+    tarballs:
+      snowflakeR: "https://github.com/Snowflake-Labs/snowflakeR/releases/download/v0.1.0/snowflakeR_0.1.0.tar.gz"
+      RSnowflake: "https://github.com/Snowflake-Labs/RSnowflake/releases/download/v0.2.0/RSnowflake_0.2.0.tar.gz"
+
+  scala:
+    enabled: true
+
+  julia:
+    enabled: false

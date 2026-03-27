@@ -117,9 +117,12 @@ class Installer:
 
         # Phase 2: Micromamba
         logger.info("Phase 2: Install/verify micromamba")
+        mirrors = self.config.mirrors
         micromamba_path = ensure_micromamba(
             root=self.config.micromamba_root_expanded,
             force=self.config.force_reinstall,
+            custom_url=mirrors.micromamba_url,
+            ssl_cert_path=mirrors.ssl_cert_path,
         )
         report.micromamba_path = micromamba_path
         os.environ["PATH"] = (
@@ -129,12 +132,17 @@ class Installer:
 
         # Phase 3: Merged conda install
         logger.info("Phase 3: Conda environment setup")
+        conda_channel = mirrors.conda_channel or "conda-forge"
+        if mirrors.conda_channel:
+            logger.info("  Using custom conda channel: %s", conda_channel)
         all_conda_packages = self._collect_conda_packages()
         logger.info("  Combined packages: %s", " ".join(all_conda_packages))
         env_prefix = create_or_update_env(
             env_name=self.config.env_name,
             packages=all_conda_packages,
+            channel=conda_channel,
             force=self.config.force_reinstall,
+            ssl_cert_path=mirrors.ssl_cert_path,
         )
         report.env_prefix = env_prefix
         os.environ["PATH"] = (
@@ -146,7 +154,11 @@ class Installer:
         logger.info("Phase 4: Pip packages for notebook kernel")
         all_pip_packages = self._collect_pip_packages()
         if all_pip_packages:
-            self._install_pip_packages(all_pip_packages)
+            self._install_pip_packages(
+                all_pip_packages,
+                pypi_index=mirrors.pypi_index,
+                ssl_cert_path=mirrors.ssl_cert_path,
+            )
         else:
             logger.info("  No pip packages required")
         logger.info("")
@@ -218,13 +230,25 @@ class Installer:
                 resolved.append(resolve_version_conflict(base_name, requests))
         return resolved
 
-    def _install_pip_packages(self, packages: list[str]) -> None:
+    def _install_pip_packages(
+        self,
+        packages: list[str],
+        pypi_index: str = "",
+        ssl_cert_path: str = "",
+    ) -> None:
         """Install pip packages into the notebook kernel."""
+        index_flags: list[str] = []
+        if pypi_index:
+            logger.info("  Using custom PyPI index: %s", pypi_index)
+            index_flags = ["--index-url", pypi_index]
+        if ssl_cert_path and os.path.isfile(ssl_cert_path):
+            index_flags += ["--cert", ssl_cert_path]
+
         for pkg in packages:
             logger.info("  Installing pip: %s", pkg)
             try:
                 run_cmd(
-                    ["python3", "-m", "pip", "install", pkg, "-q"],
+                    ["python3", "-m", "pip", "install", pkg, "-q"] + index_flags,
                     description=f"pip install {pkg}",
                 )
             except Exception:
@@ -395,14 +419,21 @@ class Installer:
             return None
 
     def _has_network_access(self) -> bool:
-        """Quick connectivity check to conda-forge (the critical host)."""
+        """Quick connectivity check to conda channel (the critical host)."""
         import urllib.request
+        mirrors = self.config.mirrors
+        if mirrors.conda_channel:
+            url = mirrors.conda_channel.rstrip("/") + "/noarch/repodata.json.bz2"
+        else:
+            url = "https://conda.anaconda.org/conda-forge/noarch/repodata.json.bz2"
         try:
-            req = urllib.request.Request(
-                "https://conda.anaconda.org/conda-forge/noarch/repodata.json.bz2",
-                method="HEAD",
-            )
-            urllib.request.urlopen(req, timeout=5)
+            req = urllib.request.Request(url, method="HEAD")
+            kwargs = {"timeout": 5}
+            if mirrors.ssl_cert_path and os.path.isfile(mirrors.ssl_cert_path):
+                import ssl
+                ctx = ssl.create_default_context(cafile=mirrors.ssl_cert_path)
+                kwargs["context"] = ctx
+            urllib.request.urlopen(req, **kwargs)
             return True
         except Exception:
             return False
@@ -423,6 +454,12 @@ class Installer:
 
         helpers_dir = Path(__file__).parent / "helpers"
         modules_to_deploy = []
+
+        # Always deploy the query tracker (cross-language query ID capture)
+        qt_src = helpers_dir / "query_tracker.py"
+        if qt_src.exists():
+            modules_to_deploy.append(("query_tracker.py", qt_src))
+
         for plugin in self.plugins:
             module_name = plugin.get_helper_module_name()
             src = helpers_dir / module_name
