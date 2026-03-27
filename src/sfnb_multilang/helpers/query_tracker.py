@@ -53,14 +53,17 @@ class QueryTracker:
 
     def _notify(self, query_record, **kwargs):
         """Called by ServerConnection for every query execution."""
-        entry = {
-            "query_id": getattr(query_record, "query_id", str(query_record)),
-            "sql": getattr(query_record, "sql_text", str(query_record)),
-            "is_user_query": "dataframe_uuid" in kwargs,
-            "dataframe_uuid": kwargs.get("dataframe_uuid"),
-        }
-        with self._lock:
-            self._cell_buffer.append(entry)
+        try:
+            entry = {
+                "query_id": getattr(query_record, "query_id", str(query_record)),
+                "sql": getattr(query_record, "sql_text", str(query_record)),
+                "is_user_query": "dataframe_uuid" in kwargs,
+                "dataframe_uuid": kwargs.get("dataframe_uuid"),
+            }
+            with self._lock:
+                self._cell_buffer.append(entry)
+        except Exception:
+            pass
 
     def _pre_run_cell(self, info):
         """IPython pre_run_cell callback -- snapshot state."""
@@ -72,15 +75,20 @@ class QueryTracker:
                 k for k in list(ip.user_ns.keys())
                 if k.startswith("dataframe_")
             }
+            with self._lock:
+                self._cell_buffer.clear()
+                self._current_cell = None
         except Exception:
             self._known_dfs = set()
 
-        with self._lock:
-            self._cell_buffer.clear()
-            self._current_cell = None
-
     def _post_run_cell(self, result):
         """IPython post_run_cell callback -- commit captured queries."""
+        try:
+            self._post_run_cell_inner(result)
+        except Exception:
+            pass
+
+    def _post_run_cell_inner(self, result):
         cell_num = getattr(result, "execution_count", None)
 
         ip = _get_ipython()
@@ -103,14 +111,12 @@ class QueryTracker:
         if not user_queries and not all_queries:
             return
 
-        # For SQL cells: exactly one user query with a new dataframe_N
         if user_queries:
             uq = user_queries[-1]
             df_name = None
             if len(new_dfs) == 1:
                 df_name = next(iter(new_dfs))
             elif len(new_dfs) > 1:
-                # Multiple new dataframes -- pick the one with highest N
                 df_name = sorted(new_dfs, key=_df_sort_key)[-1]
 
             record = {
@@ -126,8 +132,6 @@ class QueryTracker:
                 _nb_queries["dataframes"][df_name] = uq["query_id"]
             return
 
-        # For Python/R cells that execute queries via session.sql().collect():
-        # No dataframe_uuid, but we still capture the last query from the cell.
         if all_queries:
             last = all_queries[-1]
             record = {
