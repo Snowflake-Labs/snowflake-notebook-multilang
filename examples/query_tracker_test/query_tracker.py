@@ -54,15 +54,24 @@ class QueryTracker:
     def _notify(self, query_record, **kwargs):
         """Called by ServerConnection for every query execution."""
         try:
+            qid = getattr(query_record, "query_id", None)
+            sql = getattr(query_record, "sql_text", None)
+            if qid is None:
+                try:
+                    qid = str(query_record)
+                except BaseException:
+                    qid = "<unknown>"
+            if sql is None:
+                sql = ""
             entry = {
-                "query_id": getattr(query_record, "query_id", str(query_record)),
-                "sql": getattr(query_record, "sql_text", str(query_record)),
+                "query_id": qid,
+                "sql": sql,
                 "is_user_query": "dataframe_uuid" in kwargs,
                 "dataframe_uuid": kwargs.get("dataframe_uuid"),
             }
             with self._lock:
                 self._cell_buffer.append(entry)
-        except Exception:
+        except BaseException:
             pass
 
     def _pre_run_cell(self, info):
@@ -78,14 +87,14 @@ class QueryTracker:
             with self._lock:
                 self._cell_buffer.clear()
                 self._current_cell = None
-        except Exception:
+        except BaseException:
             self._known_dfs = set()
 
     def _post_run_cell(self, result):
         """IPython post_run_cell callback -- commit captured queries."""
         try:
             self._post_run_cell_inner(result)
-        except Exception:
+        except BaseException:
             pass
 
     def _post_run_cell_inner(self, result):
@@ -167,9 +176,17 @@ def _get_ipython():
 # ---------------------------------------------------------------------------
 
 def nb_last_query_id() -> str | None:
-    """Return the query ID of the most recent user query, or None."""
+    """Return the query ID of the most recent user query, or None.
+
+    Checks both committed queries (from previous cells) and the
+    in-flight buffer (current cell, not yet flushed by post_run_cell).
+    """
     if _nb_queries["all"]:
         return _nb_queries["all"][-1]["query_id"]
+    if _tracker is not None:
+        with _tracker._lock:
+            if _tracker._cell_buffer:
+                return _tracker._cell_buffer[-1]["query_id"]
     return None
 
 
@@ -239,21 +256,25 @@ def install_query_tracker(session) -> QueryTracker | None:
 
     try:
         conn.add_query_listener(tracker)
-    except Exception:
+    except BaseException:
         return None
-
-    ip = _get_ipython()
-    if ip is not None:
-        ip.events.register("pre_run_cell", tracker._pre_run_cell)
-        ip.events.register("post_run_cell", tracker._post_run_cell)
 
     _tracker = tracker
 
-    # Expose in IPython namespace for cross-language access
+    ip = _get_ipython()
     if ip is not None:
-        ip.user_ns["_nb_query_tracker"] = tracker
-        ip.user_ns["_nb_queries"] = _nb_queries
-        ip.user_ns["nb_last_query_id"] = nb_last_query_id
-        ip.user_ns["nb_query_id"] = nb_query_id
+        try:
+            ip.events.register("pre_run_cell", tracker._pre_run_cell)
+            ip.events.register("post_run_cell", tracker._post_run_cell)
+        except BaseException:
+            pass
+
+        try:
+            ip.user_ns["_nb_query_tracker"] = tracker
+            ip.user_ns["_nb_queries"] = _nb_queries
+            ip.user_ns["nb_last_query_id"] = nb_last_query_id
+            ip.user_ns["nb_query_id"] = nb_query_id
+        except BaseException:
+            pass
 
     return tracker

@@ -1209,17 +1209,6 @@ def setup_notebook(
     session = get_active_session()
     effective_ctx = _set_session_context(session, cfg, quiet=quiet)
 
-    # -- 1b. Query tracker (implicit cross-language query ID capture) ------
-    try:
-        try:
-            from sfnb_multilang.helpers.query_tracker import install_query_tracker
-        except ImportError:
-            from query_tracker import install_query_tracker
-        install_query_tracker(session)
-        _log("  Query tracker: installed", quiet=quiet)
-    except Exception as exc:
-        _log(f"  Query tracker: skipped ({exc})", quiet=quiet)
-
     # -- 2. EAI validation -------------------------------------------------
     _log("\n--- EAI validation ---", quiet=quiet)
     eai_result = ensure_eai(session=session, config=config, quiet=quiet)

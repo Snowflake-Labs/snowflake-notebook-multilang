@@ -34,7 +34,7 @@ languages:
       RSnowflake: "https://github.com/Snowflake-Labs/RSnowflake/releases/download/v0.2.0/RSnowflake_0.2.0.tar.gz"
 
   scala:
-    enabled: false
+    enabled: true
 
   julia:
     enabled: false
