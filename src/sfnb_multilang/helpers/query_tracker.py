@@ -54,8 +54,14 @@ class QueryTracker:
     def _notify(self, query_record, **kwargs):
         """Called by ServerConnection for every query execution."""
         try:
-            qid = getattr(query_record, "query_id", None)
-            sql = getattr(query_record, "sql_text", None)
+            qid = (
+                getattr(query_record, "sfqid", None)
+                or getattr(query_record, "query_id", None)
+            )
+            sql = (
+                getattr(query_record, "query", None)
+                or getattr(query_record, "sql_text", None)
+            )
             if qid is None:
                 try:
                     qid = str(query_record)
@@ -75,18 +81,45 @@ class QueryTracker:
             pass
 
     def _pre_run_cell(self, info):
-        """IPython pre_run_cell callback -- snapshot state."""
+        """IPython pre_run_cell callback -- flush orphans then snapshot.
+
+        Any queries sitting in the buffer were produced by non-Python cells
+        (e.g. SQL cells) that never trigger post_run_cell.  Flush them to
+        ``_nb_queries['all']`` so they are permanently available via
+        ``nb_last_query_id()`` before the buffer is cleared.
+        """
         try:
             ip = _get_ipython()
             if ip is None:
                 return
-            self._known_dfs = {
+
+            current_dfs = {
                 k for k in list(ip.user_ns.keys())
                 if k.startswith("dataframe_")
             }
+            new_dfs = current_dfs - self._known_dfs
+
             with self._lock:
+                orphaned = list(self._cell_buffer)
                 self._cell_buffer.clear()
                 self._current_cell = None
+
+            for entry in orphaned:
+                df_name = None
+                if entry["is_user_query"] and new_dfs:
+                    df_name = sorted(new_dfs, key=_df_sort_key)[-1]
+                    new_dfs.discard(df_name)
+                record = {
+                    "query_id": entry["query_id"],
+                    "sql": entry["sql"],
+                    "cell": None,
+                    "dataframe": df_name,
+                }
+                _nb_queries["all"].append(record)
+                if df_name:
+                    _nb_queries["dataframes"][df_name] = entry["query_id"]
+
+            self._known_dfs = current_dfs
         except BaseException:
             self._known_dfs = set()
 
@@ -176,17 +209,20 @@ def _get_ipython():
 # ---------------------------------------------------------------------------
 
 def nb_last_query_id() -> str | None:
-    """Return the query ID of the most recent user query, or None.
+    """Return the query ID of the most recent query, or None.
 
-    Checks both committed queries (from previous cells) and the
-    in-flight buffer (current cell, not yet flushed by post_run_cell).
+    Checks the in-flight buffer first (queries from the current cell or
+    from non-Python cells that haven't been flushed yet), then falls back
+    to committed queries from previous cells.  This ensures SQL cell
+    queries are visible immediately without waiting for a Python cell
+    lifecycle to flush them.
     """
-    if _nb_queries["all"]:
-        return _nb_queries["all"][-1]["query_id"]
     if _tracker is not None:
         with _tracker._lock:
             if _tracker._cell_buffer:
                 return _tracker._cell_buffer[-1]["query_id"]
+    if _nb_queries["all"]:
+        return _nb_queries["all"][-1]["query_id"]
     return None
 
 
