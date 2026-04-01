@@ -97,6 +97,20 @@ class MirrorsConfig:
 
 
 @dataclass
+class RegistryConfig:
+    """Model Registry defaults applied via environment variables.
+
+    When ``conda_channel`` is set, ``setup_notebook()`` exports
+    ``SFR_CONDA_CHANNEL`` so that every ``sfr_log_model()`` call
+    automatically prefixes conda dependencies with the specified channel.
+    When ``conda_channel_strict`` is also ``True``, users cannot override
+    the channel at call-time.
+    """
+    conda_channel: str = ""
+    conda_channel_strict: bool = False
+
+
+@dataclass
 class NetworkRuleConfig:
     apply_in_installer: bool = True
     account: str = ""
@@ -123,6 +137,7 @@ class ToolkitConfig:
     scala: ScalaConfig = field(default_factory=ScalaConfig)
     julia: JuliaConfig = field(default_factory=JuliaConfig)
     mirrors: MirrorsConfig = field(default_factory=MirrorsConfig)
+    registry: RegistryConfig = field(default_factory=RegistryConfig)
     network_rule: NetworkRuleConfig = field(default_factory=NetworkRuleConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
 
@@ -258,6 +273,13 @@ def _build_config(raw: dict) -> ToolkitConfig:
         ssl_cert_path=str(mir_raw.get("ssl_cert_path", "")),
     )
 
+    # Registry config (Model Registry conda channel policy)
+    reg_raw = raw.get("registry", {}) or {}
+    cfg.registry = RegistryConfig(
+        conda_channel=str(reg_raw.get("conda_channel", "")),
+        conda_channel_strict=bool(reg_raw.get("conda_channel_strict", False)),
+    )
+
     # Network rule config
     nr_raw = raw.get("network_rule", {}) or {}
     cfg.network_rule = NetworkRuleConfig(
@@ -322,6 +344,10 @@ def config_to_dict(cfg: ToolkitConfig) -> dict:
             "cran_mirror": cfg.mirrors.cran_mirror,
             "micromamba_url": cfg.mirrors.micromamba_url,
             "ssl_cert_path": cfg.mirrors.ssl_cert_path,
+        },
+        "registry": {
+            "conda_channel": cfg.registry.conda_channel,
+            "conda_channel_strict": cfg.registry.conda_channel_strict,
         },
         "network_rule": {
             "apply_in_installer": cfg.network_rule.apply_in_installer,

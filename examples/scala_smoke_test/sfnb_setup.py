@@ -109,6 +109,28 @@ def _get_mirrors(cfg: dict) -> dict:
     }
 
 
+def _apply_registry_env(cfg: dict, quiet: bool = False):
+    """Export SFR_CONDA_CHANNEL env vars from the registry: YAML section.
+
+    These env vars are read by snowflakeR's sfr_model_registry() and
+    sfr_log_model() to enforce a conda channel policy for Model Registry
+    inference containers (MODEL_BUILD).
+    """
+    raw = cfg.get("registry", {}) or {}
+    channel = str(raw.get("conda_channel", ""))
+    strict = raw.get("conda_channel_strict", False)
+
+    if channel:
+        os.environ["SFR_CONDA_CHANNEL"] = channel
+        if strict:
+            os.environ["SFR_CONDA_CHANNEL_STRICT"] = "true"
+        _log(
+            f"  Registry conda channel: {channel}"
+            f"{' (strict)' if strict else ''}",
+            quiet=quiet,
+        )
+
+
 def _pip_index_flags(mirrors: dict) -> list[str]:
     """Build pip --index-url / --cert flags from mirrors config."""
     flags: list[str] = []
@@ -1203,6 +1225,10 @@ def setup_notebook(
         for k, v in mirrors.items():
             if v:
                 _log(f"  {k}: {v}", quiet=quiet)
+
+    # Export Model Registry conda channel policy as env vars so that
+    # sfr_model_registry() / sfr_log_model() pick it up automatically.
+    _apply_registry_env(cfg, quiet=quiet)
 
     # -- 1. Session context ------------------------------------------------
     from snowflake.snowpark.context import get_active_session

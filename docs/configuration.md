@@ -121,6 +121,35 @@ for full setup instructions.
 When mirrors are configured, the EAI domain list is automatically
 reduced to just the mirror host(s).
 
+## Model Registry (`registry`)
+
+Control the conda channel policy for Model Registry inference containers.
+When set, `setup_notebook()` exports environment variables that snowflakeR's
+`sfr_model_registry()` and `sfr_log_model()` pick up automatically.
+
+| Key | Default | Description |
+|---|---|---|
+| `conda_channel` | `""` (Snowflake Anaconda Channel) | Conda channel name to prefix on all `conda_dependencies` passed to `log_model()`. Set to `"conda-forge"` to avoid Anaconda Inc. commercial channels. |
+| `conda_channel_strict` | `false` | When `true`, users cannot override the channel at call-time. Any `sfr_log_model()` call that tries to use a different channel will error. |
+
+**Example -- force conda-forge for all models:**
+
+```yaml
+registry:
+  conda_channel: conda-forge
+  conda_channel_strict: true
+```
+
+This exports `SFR_CONDA_CHANNEL=conda-forge` and
+`SFR_CONDA_CHANNEL_STRICT=true` into the notebook process. Every
+`sfr_log_model()` call inherits the channel automatically, and strict
+mode prevents individual users from bypassing the policy.
+
+**Note:** This controls the *inference container* channel (MODEL_BUILD in
+SPCS). The `mirrors.conda_channel` setting controls where the *notebook
+setup* downloads packages -- they are independent settings, though in
+practice you'd typically set both to conda-forge.
+
 ## Network Rules (`network_rule`)
 
 | Key | Default | Description |

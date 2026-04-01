@@ -38,6 +38,15 @@
 #   micromamba_url: "https://artifactory.example.com/generic-tools/micromamba/linux-64/latest"
 #   ssl_cert_path: "/etc/ssl/certs/corporate-ca-bundle.crt"
 
+# -- Model Registry conda channel policy (optional) ---------------------------
+# Force all sfr_log_model() conda_dependencies to resolve from a specific
+# channel (e.g. conda-forge) instead of the default Snowflake Anaconda Channel.
+# Set conda_channel_strict: true to prevent users from overriding the channel.
+#
+# registry:
+#   conda_channel: "conda-forge"
+#   conda_channel_strict: true
+
 # -- Language and package spec ------------------------------------------------
 env_name: "workspace_env"
 
