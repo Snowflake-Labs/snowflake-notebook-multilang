@@ -78,9 +78,9 @@ class TestGenerateSQL:
         cfg.scala.enabled = True
         cfg.julia.enabled = True
         sql = generate_network_rule_sql(cfg)
-        # github.com should only appear once in the VALUE_LIST
+        # Literal 'github.com' (not api.github.com / codeload.github.com)
         value_section = sql.split("VALUE_LIST")[1].split(";")[0]
-        assert value_section.count("github.com") == 1
+        assert value_section.count("'github.com'") == 1
 
     def test_no_languages(self):
         cfg = ToolkitConfig()

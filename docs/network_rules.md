@@ -172,6 +172,24 @@ EAI to:
 VALUE_LIST = ('artifactory.snowflake.com')
 ```
 
+### Authenticated Mirrors
+
+When `mirrors.auth_secret` is configured in the YAML, the generated
+EAI SQL automatically includes `ALLOWED_AUTHENTICATION_SECRETS` so
+the notebook container can access the Snowflake Secret at runtime:
+
+```sql
+CREATE OR REPLACE EXTERNAL ACCESS INTEGRATION MULTILANG_NOTEBOOK_EAI
+  ALLOWED_NETWORK_RULES = (MULTILANG_NOTEBOOK_EGRESS)
+  ALLOWED_AUTHENTICATION_SECRETS = (mydb.myschema.artifactory_creds)
+  ENABLED = TRUE;
+```
+
+This applies to both the `sfnb-multilang` installer's Phase 0
+network rule setup and the `sfnb_setup.py` helper's EAI generation.
+See [custom_mirrors.md -- Authenticated Mirrors](custom_mirrors.md#authenticated-mirrors)
+for the full setup guide.
+
 ## Dynamic Application
 
 EAI changes apply **dynamically** to a running notebook. When the SQL

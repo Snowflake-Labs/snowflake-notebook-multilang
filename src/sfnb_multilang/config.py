@@ -94,6 +94,7 @@ class MirrorsConfig:
     cran_mirror: str = ""
     micromamba_url: str = ""
     ssl_cert_path: str = ""
+    auth_secret: str = ""
 
 
 @dataclass
@@ -271,6 +272,7 @@ def _build_config(raw: dict) -> ToolkitConfig:
         cran_mirror=str(mir_raw.get("cran_mirror", "")),
         micromamba_url=str(mir_raw.get("micromamba_url", "")),
         ssl_cert_path=str(mir_raw.get("ssl_cert_path", "")),
+        auth_secret=str(mir_raw.get("auth_secret", "")),
     )
 
     # Registry config (Model Registry conda channel policy)
@@ -344,6 +346,7 @@ def config_to_dict(cfg: ToolkitConfig) -> dict:
             "cran_mirror": cfg.mirrors.cran_mirror,
             "micromamba_url": cfg.mirrors.micromamba_url,
             "ssl_cert_path": cfg.mirrors.ssl_cert_path,
+            "auth_secret": cfg.mirrors.auth_secret,
         },
         "registry": {
             "conda_channel": cfg.registry.conda_channel,

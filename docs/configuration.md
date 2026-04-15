@@ -117,9 +117,11 @@ for full setup instructions.
 | `cran_mirror` | `cloud.r-project.org` | CRAN mirror URL for `install.packages()` |
 | `micromamba_url` | `micro.mamba.pm` | Direct URL for micromamba binary download |
 | `ssl_cert_path` | system CA bundle | Path to CA cert bundle for TLS inspection proxies |
+| `auth_secret` | (none) | Fully qualified Snowflake `PASSWORD` secret for mirror auth ([details](custom_mirrors.md#authenticated-mirrors)) |
 
 When mirrors are configured, the EAI domain list is automatically
-reduced to just the mirror host(s).
+reduced to just the mirror host(s). When `auth_secret` is set, the
+generated EAI also includes `ALLOWED_AUTHENTICATION_SECRETS`.
 
 ## Model Registry (`registry`)
 

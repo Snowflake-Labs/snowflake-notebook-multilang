@@ -66,6 +66,7 @@ All fields are optional. Omitted fields fall back to the public default.
 | `cran_mirror` | CRAN repo | `https://cloud.r-project.org` | URL to a CRAN remote repo |
 | `micromamba_url` | HTTP(S) binary download | `micro.mamba.pm` / GitHub | Direct URL to a micromamba binary or `.tar.bz2` archive |
 | `ssl_cert_path` | N/A | system default | Path to a CA certificate bundle for TLS inspection proxies |
+| `auth_secret` | N/A | (none) | Fully qualified name of a Snowflake `PASSWORD` secret for mirror authentication (see [Authenticated Mirrors](#authenticated-mirrors)) |
 
 ### Tarball URLs
 
@@ -228,6 +229,111 @@ import os
 os.environ["CURL_CA_BUNDLE"] = "/etc/ssl/certs/corporate-ca-bundle.crt"
 ```
 
+## Authenticated Mirrors
+
+Most regulated organizations disable anonymous access on their
+artifact repository (JFrog's recommended security posture). When
+anonymous access is off, every client must authenticate -- typically
+with a username and API key.
+
+The `auth_secret` field in the `mirrors` config references a
+**Snowflake SECRET** (type `PASSWORD`) that stores the repository
+credentials. `setup_notebook()` reads the secret at runtime and
+injects basic-auth credentials into all mirror URLs automatically.
+No credentials appear in the YAML config.
+
+### Prerequisites
+
+Snowflake Secrets in Workspace Notebooks (private preview, April
+2026). Requires:
+
+- Snowpark Secrets API (`snowflake.snowpark.secrets`) or container
+  mount path access (`/secrets/...`)
+- A `PASSWORD`-type Snowflake Secret
+- The secret included in the EAI via `ALLOWED_AUTHENTICATION_SECRETS`
+
+### Setup
+
+**1. Create the secret (admin, one-time):**
+
+```sql
+CREATE SECRET mydb.myschema.artifactory_creds
+  TYPE = PASSWORD
+  USERNAME = 'deploy-token'
+  PASSWORD = '<artifactory-api-key>';
+```
+
+The username is typically a service account or deploy token. The
+password is the Artifactory API key or identity token.
+
+**2. Include the secret in the EAI:**
+
+```sql
+CREATE OR REPLACE NETWORK RULE MULTILANG_NOTEBOOK_EGRESS
+  MODE = EGRESS
+  TYPE = HOST_PORT
+  VALUE_LIST = ('artifactory.example.com');
+
+CREATE OR REPLACE EXTERNAL ACCESS INTEGRATION MULTILANG_NOTEBOOK_EAI
+  ALLOWED_NETWORK_RULES = (MULTILANG_NOTEBOOK_EGRESS)
+  ALLOWED_AUTHENTICATION_SECRETS = (mydb.myschema.artifactory_creds)
+  ENABLED = TRUE;
+```
+
+When `auth_secret` is configured, the toolkit's EAI SQL generator
+automatically includes `ALLOWED_AUTHENTICATION_SECRETS` in the
+generated SQL.
+
+**3. Select the secret when creating the notebook service:**
+
+In Snowsight, when creating or editing the notebook service, add the
+secret (`mydb.myschema.artifactory_creds`) in the Secrets field of
+the service creation dialog.
+
+**4. Add `auth_secret` to the YAML config:**
+
+```yaml
+mirrors:
+  conda_channel: "https://artifactory.example.com/conda-forge-remote"
+  pypi_index: "https://artifactory.example.com/api/pypi/pypi-remote/simple"
+  cran_mirror: "https://artifactory.example.com/cran-remote"
+  micromamba_url: "https://artifactory.example.com/generic-tools/micromamba/linux-64/latest"
+  ssl_cert_path: "/etc/ssl/certs/corporate-ca-bundle.crt"
+  auth_secret: "mydb.myschema.artifactory_creds"
+```
+
+The `auth_secret` value is the fully qualified name of the Snowflake
+Secret (`database.schema.name`). Both dot notation
+(`mydb.myschema.artifactory_creds`) and slash notation
+(`mydb/myschema/artifactory_creds`) are accepted.
+
+### How it Works
+
+When `setup_notebook()` runs:
+
+1. The secret is read via `snowflake.snowpark.secrets.get_username_password()`
+   (with a fallback to the container mount path at
+   `/secrets/db/schema/name/{username,password}`)
+2. The username and password are injected as basic-auth credentials
+   into each mirror URL: `https://user:token@host/path`
+3. The authenticated URLs are passed to pip (`--index-url`), conda
+   (channel URL), micromamba (download URL), and CRAN (`repos`)
+4. Credentials are masked in all log output (`user:****@host`)
+
+If the secret cannot be read (e.g. not attached to the service, or
+the Secrets API is unavailable), a warning is logged and mirror URLs
+remain unauthenticated.
+
+### Security Notes
+
+- Credentials are never written to disk, config files, or log files
+- The secret is managed via Snowflake's RBAC -- only roles with
+  `USAGE` on the secret can read it
+- Credential rotation is handled by updating the Snowflake Secret;
+  no YAML changes or notebook restarts needed
+- The `PASSWORD` secret type is recommended for Artifactory API keys
+  (`USERNAME` = service account, `PASSWORD` = API key)
+
 ## Zero-Code-Change Alternative
 
 If modifying the config YAML is not practical, the same result can be
@@ -345,6 +451,45 @@ conda_channel: "https://artifactory.snowflake.com/conda-forge-remote"
 # Wrong (API path)
 conda_channel: "https://artifactory.snowflake.com/api/conda/conda-forge-remote"
 ```
+
+### "401 Unauthorized" from mirror
+
+Anonymous access is disabled on your artifact repository but
+`auth_secret` is not configured (or the secret could not be read).
+
+**Diagnosis:**
+
+1. Verify `auth_secret` is set in your config YAML
+2. Check that the Snowflake Secret exists:
+   `DESCRIBE SECRET mydb.myschema.artifactory_creds;`
+3. Verify the secret is included in the EAI:
+   `DESCRIBE INTEGRATION MULTILANG_NOTEBOOK_EAI;` -- look for
+   `ALLOWED_AUTHENTICATION_SECRETS`
+4. Verify the secret was selected when creating the notebook service
+5. Check the setup log for `auth_secret ... credentials could not be
+   read` -- this means neither the Snowpark API nor the mount path
+   could access the secret
+
+### "auth_secret configured but credentials could not be read"
+
+The `auth_secret` is set in the YAML but `setup_notebook()` could
+not read the credentials. Common causes:
+
+- **Secret not attached to notebook service:** The secret must be
+  selected when creating or editing the Workspace notebook service in
+  Snowsight, in addition to SQL on the EAI. How you attach secrets
+  depends on environment: **Snowhouse** — enter fully qualified secret
+  names as `DB.SCHEMA.SECRET_NAME`, comma-separated for multiple;
+  **QA6** — use the multi-select secrets dropdown in the create-service
+  dialog. If this step is skipped, the Snowpark Secrets API and the
+  `/secrets/...` mount both fail, and mirror URLs stay unauthenticated.
+- **Secret not in EAI:** The secret must be listed in
+  `ALLOWED_AUTHENTICATION_SECRETS` on the EAI
+- **Wrong secret path:** The `auth_secret` value must be fully
+  qualified (`db.schema.name` or `db/schema/name`)
+- **Snowpark Secrets API not available:** If the private preview is
+  not enabled for your account, the container mount path fallback
+  is used instead
 
 ### micromamba download fails
 

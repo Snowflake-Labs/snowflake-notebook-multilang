@@ -37,6 +37,7 @@
 #   cran_mirror: "https://artifactory.example.com/cran-remote"
 #   micromamba_url: "https://artifactory.example.com/generic-tools/micromamba/linux-64/latest"
 #   ssl_cert_path: "/etc/ssl/certs/corporate-ca-bundle.crt"
+#   auth_secret: "mydb.myschema.artifactory_creds"  # Snowflake PASSWORD secret
 
 # -- Model Registry conda channel policy (optional) ---------------------------
 # Force all sfr_log_model() conda_dependencies to resolve from a specific

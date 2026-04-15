@@ -34,6 +34,81 @@ logger = logging.getLogger("sfnb_multilang.installer")
 
 
 # ---------------------------------------------------------------------------
+# Mirror authentication helpers
+# ---------------------------------------------------------------------------
+
+def _normalize_secret_path(raw: str) -> str:
+    """Accept ``db.schema.name`` or ``db/schema/name``; return slash form."""
+    return raw.replace(".", "/") if "/" not in raw else raw
+
+
+def read_mirror_credentials(auth_secret: str) -> tuple[str, str]:
+    """Read username/password from a Snowflake PASSWORD secret.
+
+    Tries the Snowpark Secrets API first, then falls back to the container
+    mount path ``/secrets/<db>/<schema>/<name>/{username,password}``.
+    Returns ``("", "")`` if the secret cannot be read.
+    """
+    if not auth_secret:
+        return ("", "")
+
+    secret_path = _normalize_secret_path(auth_secret)
+
+    try:
+        from snowflake.snowpark.secrets import get_username_password
+        creds = get_username_password(secret_path)
+        logger.debug("Mirror credentials read via Snowpark Secrets API")
+        return (creds.username, creds.password)
+    except Exception:
+        pass
+
+    mount = f"/secrets/{secret_path}"
+    try:
+        username = open(f"{mount}/username").read().strip()
+        password = open(f"{mount}/password").read().strip()
+        logger.debug("Mirror credentials read via container mount path")
+        return (username, password)
+    except (OSError, FileNotFoundError):
+        pass
+
+    logger.warning(
+        "auth_secret '%s' configured but credentials could not be read "
+        "(Snowpark API unavailable and mount path %s not found). "
+        "Proceeding without authentication.",
+        auth_secret, mount,
+    )
+    return ("", "")
+
+
+def inject_auth_into_url(url: str, username: str, password: str) -> str:
+    """Embed ``username:password@`` into a URL for basic-auth."""
+    if not url or not username:
+        return url
+    from urllib.parse import urlparse, urlunparse, quote
+    parsed = urlparse(url)
+    if parsed.username:
+        return url
+    netloc = f"{quote(username, safe='')}:{quote(password, safe='')}@{parsed.hostname}"
+    if parsed.port:
+        netloc += f":{parsed.port}"
+    return urlunparse(parsed._replace(netloc=netloc))
+
+
+def mask_url_credentials(url: str) -> str:
+    """Replace ``user:pass@host`` with ``user:****@host`` for safe logging."""
+    if not url:
+        return url
+    from urllib.parse import urlparse, urlunparse
+    parsed = urlparse(url)
+    if not parsed.password:
+        return url
+    masked_netloc = f"{parsed.username}:****@{parsed.hostname}"
+    if parsed.port:
+        masked_netloc += f":{parsed.port}"
+    return urlunparse(parsed._replace(netloc=masked_netloc))
+
+
+# ---------------------------------------------------------------------------
 # Install report
 # ---------------------------------------------------------------------------
 
@@ -115,13 +190,22 @@ class Installer:
             raise PreflightError(preflight_result.errors)
         logger.info("")
 
+        # Resolve mirror authentication credentials (once for all phases)
+        mirrors = self.config.mirrors
+        auth_user, auth_pass = read_mirror_credentials(mirrors.auth_secret)
+        if auth_user:
+            logger.info("Mirror authentication: credentials loaded for '%s'",
+                        mirrors.auth_secret)
+
+        def _auth_url(url: str) -> str:
+            return inject_auth_into_url(url, auth_user, auth_pass)
+
         # Phase 2: Micromamba
         logger.info("Phase 2: Install/verify micromamba")
-        mirrors = self.config.mirrors
         micromamba_path = ensure_micromamba(
             root=self.config.micromamba_root_expanded,
             force=self.config.force_reinstall,
-            custom_url=mirrors.micromamba_url,
+            custom_url=_auth_url(mirrors.micromamba_url),
             ssl_cert_path=mirrors.ssl_cert_path,
         )
         report.micromamba_path = micromamba_path
@@ -132,9 +216,10 @@ class Installer:
 
         # Phase 3: Merged conda install
         logger.info("Phase 3: Conda environment setup")
-        conda_channel = mirrors.conda_channel or "conda-forge"
+        conda_channel = _auth_url(mirrors.conda_channel) or "conda-forge"
         if mirrors.conda_channel:
-            logger.info("  Using custom conda channel: %s", conda_channel)
+            logger.info("  Using custom conda channel: %s",
+                        mask_url_credentials(conda_channel))
         all_conda_packages = self._collect_conda_packages()
         logger.info("  Combined packages: %s", " ".join(all_conda_packages))
         env_prefix = create_or_update_env(
@@ -156,7 +241,7 @@ class Installer:
         if all_pip_packages:
             self._install_pip_packages(
                 all_pip_packages,
-                pypi_index=mirrors.pypi_index,
+                pypi_index=_auth_url(mirrors.pypi_index),
                 ssl_cert_path=mirrors.ssl_cert_path,
             )
         else:
@@ -239,7 +324,8 @@ class Installer:
         """Install pip packages into the notebook kernel."""
         index_flags: list[str] = []
         if pypi_index:
-            logger.info("  Using custom PyPI index: %s", pypi_index)
+            logger.info("  Using custom PyPI index: %s",
+                        mask_url_credentials(pypi_index))
             index_flags = ["--index-url", pypi_index]
         if ssl_cert_path and os.path.isfile(ssl_cert_path):
             index_flags += ["--cert", ssl_cert_path]
@@ -422,8 +508,11 @@ class Installer:
         """Quick connectivity check to conda channel (the critical host)."""
         import urllib.request
         mirrors = self.config.mirrors
+        auth_user, auth_pass = read_mirror_credentials(mirrors.auth_secret)
         if mirrors.conda_channel:
-            url = mirrors.conda_channel.rstrip("/") + "/noarch/repodata.json.bz2"
+            base = inject_auth_into_url(
+                mirrors.conda_channel, auth_user, auth_pass)
+            url = base.rstrip("/") + "/noarch/repodata.json.bz2"
         else:
             url = "https://conda.anaconda.org/conda-forge/noarch/repodata.json.bz2"
         try:

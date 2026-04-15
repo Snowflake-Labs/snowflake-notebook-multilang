@@ -106,7 +106,98 @@ def _get_mirrors(cfg: dict) -> dict:
         "cran_mirror": str(raw.get("cran_mirror", "")),
         "micromamba_url": str(raw.get("micromamba_url", "")),
         "ssl_cert_path": str(raw.get("ssl_cert_path", "")),
+        "auth_secret": str(raw.get("auth_secret", "")),
     }
+
+
+def _normalize_secret_path(raw: str) -> str:
+    """Accept ``db.schema.name`` or ``db/schema/name``; return slash form."""
+    return raw.replace(".", "/") if "/" not in raw else raw
+
+
+def _read_mirror_credentials(auth_secret: str) -> tuple[str, str]:
+    """Read username/password from a Snowflake PASSWORD secret.
+
+    Tries the Snowpark Secrets API first, then falls back to the container
+    mount path ``/secrets/<db>/<schema>/<name>/{username,password}``.
+    Returns ``("", "")`` if the secret cannot be read.
+    """
+    if not auth_secret:
+        return ("", "")
+
+    secret_path = _normalize_secret_path(auth_secret)
+
+    try:
+        from snowflake.snowpark.secrets import get_username_password
+        creds = get_username_password(secret_path)
+        return (creds.username, creds.password)
+    except Exception:
+        pass
+
+    mount = f"/secrets/{secret_path}"
+    try:
+        username = open(f"{mount}/username").read().strip()
+        password = open(f"{mount}/password").read().strip()
+        return (username, password)
+    except (OSError, FileNotFoundError):
+        pass
+
+    _log(
+        f"  WARNING: auth_secret '{auth_secret}' configured but credentials "
+        f"could not be read. Proceeding without mirror authentication.",
+        quiet=False,
+    )
+    return ("", "")
+
+
+def _inject_auth_url(url: str, username: str, password: str) -> str:
+    """Embed ``username:password@`` into a URL for basic-auth."""
+    if not url or not username:
+        return url
+    from urllib.parse import urlparse, urlunparse, quote
+    parsed = urlparse(url)
+    if parsed.username:
+        return url
+    netloc = f"{quote(username, safe='')}:{quote(password, safe='')}@{parsed.hostname}"
+    if parsed.port:
+        netloc += f":{parsed.port}"
+    return urlunparse(parsed._replace(netloc=netloc))
+
+
+def _mask_url_credentials(url: str) -> str:
+    """Replace ``user:pass@host`` with ``user:****@host`` for safe logging."""
+    if not url:
+        return url
+    from urllib.parse import urlparse, urlunparse
+    parsed = urlparse(url)
+    if not parsed.password:
+        return url
+    masked_netloc = f"{parsed.username}:****@{parsed.hostname}"
+    if parsed.port:
+        masked_netloc += f":{parsed.port}"
+    return urlunparse(parsed._replace(netloc=masked_netloc))
+
+
+def _apply_mirror_auth(mirrors: dict) -> dict:
+    """Resolve auth_secret and inject credentials into all mirror URLs.
+
+    Returns a new mirrors dict with authenticated URLs. The original
+    dict is not modified. If no auth_secret is configured or credentials
+    cannot be read, the original URLs are returned unchanged.
+    """
+    auth_secret = mirrors.get("auth_secret", "")
+    if not auth_secret:
+        return mirrors
+
+    username, password = _read_mirror_credentials(auth_secret)
+    if not username:
+        return mirrors
+
+    authed = dict(mirrors)
+    for key in ("conda_channel", "pypi_index", "cran_mirror", "micromamba_url"):
+        if authed.get(key):
+            authed[key] = _inject_auth_url(authed[key], username, password)
+    return authed
 
 
 def _apply_registry_env(cfg: dict, quiet: bool = False):
@@ -596,6 +687,7 @@ def _print_annotated_sql(
     covered: dict[str, str],
     eai_name: str,
     quiet: bool = False,
+    auth_secret: str = "",
 ):
     """Print CREATE OR REPLACE with covered domains commented out."""
     lines = [
@@ -614,6 +706,8 @@ def _print_annotated_sql(
     lines.append(f"")
     lines.append(f"  CREATE OR REPLACE EXTERNAL ACCESS INTEGRATION {eai_name}")
     lines.append(f"    ALLOWED_NETWORK_RULES = ({rule_name})")
+    if auth_secret:
+        lines.append(f"    ALLOWED_AUTHENTICATION_SECRETS = ({auth_secret})")
     lines.append(f"    ENABLED = TRUE;")
 
     header = f"\n  EAI domain summary ({len(missing)} new, {len(covered)} already covered):"
@@ -714,6 +808,8 @@ def ensure_eai(
         eai_section.get("supplementary_name", DEFAULT_SUPPLEMENTARY_NAME)
     ).upper()
     rule_suffix = eai_section.get("network_rule", DEFAULT_RULE_NAME).upper()
+    mirrors = _get_mirrors(cfg)
+    _auth_secret = mirrors.get("auth_secret", "")
 
     required = _domains_from_config(cfg)
 
@@ -783,7 +879,8 @@ def ensure_eai(
             result["domains_added"] = added
             _, coverage_map = _domain_coverage_map(required, eai_domains)
             _print_annotated_sql(
-                actual_rule, missing, coverage_map, target_upper, quiet=quiet)
+                actual_rule, missing, coverage_map, target_upper,
+                quiet=quiet, auth_secret=_auth_secret)
             # Re-test via DNS to confirm the change is live
             _, still_bad = _test_domain_reachability(missing)
             if still_bad:
@@ -835,9 +932,13 @@ def ensure_eai(
         f"  TYPE = HOST_PORT\n"
         f"  VALUE_LIST = ({host_list})"
     )
+    _auth_clause = (
+        f"\n  ALLOWED_AUTHENTICATION_SECRETS = ({_auth_secret})"
+        if _auth_secret else ""
+    )
     create_eai = (
         f"CREATE OR REPLACE EXTERNAL ACCESS INTEGRATION {supplementary_name}\n"
-        f"  ALLOWED_NETWORK_RULES = ({supp_rule})\n"
+        f"  ALLOWED_NETWORK_RULES = ({supp_rule}){_auth_clause}\n"
         f"  ENABLED = TRUE"
     )
     grant = ""
@@ -875,7 +976,8 @@ def ensure_eai(
     eai_domains = _collect_all_eai_domains(session, [target_eai or ""])
     _, coverage_map = _domain_coverage_map(required, eai_domains)
     _print_annotated_sql(
-        supp_rule, missing, coverage_map, supplementary_name, quiet=quiet)
+        supp_rule, missing, coverage_map, supplementary_name,
+        quiet=quiet, auth_secret=_auth_secret)
 
     if result["action"] == "print_sql":
         _log("\nCould not create EAI (insufficient privileges).", quiet=quiet)
@@ -933,12 +1035,15 @@ def _find_config_yaml() -> str | None:
     return candidates[0] if candidates else None
 
 
-def _build_eai_sql(domains: set[str]) -> str:
+def _build_eai_sql(domains: set[str], auth_secret: str = "") -> str:
     """Build CREATE NETWORK RULE + EAI SQL from a set of domains."""
     host_list = "\n".join(
         f"      '{d}'," if i < len(sorted(domains)) - 1 else f"      '{d}'"
         for i, d in enumerate(sorted(domains))
     )
+    auth_line = ""
+    if auth_secret:
+        auth_line = f"\n    ALLOWED_AUTHENTICATION_SECRETS = ({auth_secret})"
     return (
         f"  CREATE OR REPLACE NETWORK RULE {DEFAULT_RULE_NAME}\n"
         f"    MODE = EGRESS\n"
@@ -949,7 +1054,7 @@ def _build_eai_sql(domains: set[str]) -> str:
         f"\n"
         f"  CREATE OR REPLACE EXTERNAL ACCESS INTEGRATION\n"
         f"    {DEFAULT_SUPPLEMENTARY_NAME}\n"
-        f"    ALLOWED_NETWORK_RULES = ({DEFAULT_RULE_NAME})\n"
+        f"    ALLOWED_NETWORK_RULES = ({DEFAULT_RULE_NAME}){auth_line}\n"
         f"    ENABLED = TRUE;"
     )
 
@@ -980,7 +1085,7 @@ def _bootstrap():
             # Check for custom PyPI mirror from any config YAML nearby
             _boot_cfg_path = _find_config_yaml()
             _boot_cfg = _read_config(_boot_cfg_path) if _boot_cfg_path else {}
-            _boot_mirrors = _get_mirrors(_boot_cfg)
+            _boot_mirrors = _apply_mirror_auth(_get_mirrors(_boot_cfg))
             _boot_pip_flags = _pip_index_flags(_boot_mirrors)
 
             _GITHUB_URL = (
@@ -995,7 +1100,8 @@ def _bootstrap():
                 cfg_path = _find_config_yaml()
                 cfg = _read_config(cfg_path) if cfg_path else {}
                 domains = _domains_from_config(cfg)
-                eai_sql = _build_eai_sql(domains)
+                _boot_auth = _get_mirrors(cfg).get("auth_secret", "")
+                eai_sql = _build_eai_sql(domains, auth_secret=_boot_auth)
 
                 print(
                     "\n"
@@ -1073,7 +1179,7 @@ def _resolve_tarball(
     if src:
         if src.startswith(("http://", "https://")):
             dest = os.path.join(tempfile.gettempdir(), os.path.basename(src))
-            _log(f"  {pkg}: downloading {src}", quiet=quiet)
+            _log(f"  {pkg}: downloading {_mask_url_credentials(src)}", quiet=quiet)
             try:
                 if ssl_cert_path and os.path.isfile(ssl_cert_path):
                     import ssl
@@ -1134,7 +1240,7 @@ def install_r_packages(
         packages = ["snowflakeR", "RSnowflake"]
 
     cfg = _read_config(config)
-    mirrors = _get_mirrors(cfg)
+    mirrors = _apply_mirror_auth(_get_mirrors(cfg))
     cran_mirror = mirrors.get("cran_mirror") or "https://cloud.r-project.org"
     ssl_cert = mirrors.get("ssl_cert_path", "")
     pip_flags = _pip_index_flags(mirrors)
@@ -1223,8 +1329,16 @@ def setup_notebook(
     if any(mirrors.get(k) for k in ("conda_channel", "pypi_index", "cran_mirror")):
         _log("Custom mirrors configured:", quiet=quiet)
         for k, v in mirrors.items():
-            if v:
+            if v and k != "auth_secret":
                 _log(f"  {k}: {v}", quiet=quiet)
+
+    # Resolve mirror authentication and inject credentials into URLs
+    if mirrors.get("auth_secret"):
+        _log(f"  auth_secret: {mirrors['auth_secret']}", quiet=quiet)
+        mirrors = _apply_mirror_auth(mirrors)
+        if any("@" in mirrors.get(k, "") for k in
+               ("conda_channel", "pypi_index", "cran_mirror", "micromamba_url")):
+            _log("  Mirror authentication: credentials loaded", quiet=quiet)
 
     # Export Model Registry conda channel policy as env vars so that
     # sfr_model_registry() / sfr_log_model() pick it up automatically.
