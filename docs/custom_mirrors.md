@@ -6,6 +6,11 @@ internal artifact repository proxy before entering their network. This
 document explains how to configure `sfnb-multilang` to route every
 package download through a corporate mirror.
 
+For a longer **compliance-oriented** walkthrough (mirrors plus Model
+Registry channel policy, MODEL_BUILD network paths, Workspace secrets,
+and troubleshooting tables), see
+**[artifact_repository_support_summary.md](artifact_repository_support_summary.md)**.
+
 ## Background
 
 By default the toolkit downloads packages from public upstream sources:

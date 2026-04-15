@@ -182,6 +182,8 @@ and all files needed to upload to a Workspace Notebook.
 - [Quick Start Guide](docs/quickstart.md)
 - [Configuration Reference](docs/configuration.md)
 - [Network Rules](docs/network_rules.md)
+- [Custom Mirrors (Artifactory / Nexus)](docs/custom_mirrors.md)
+- [Artifact repos & conda compliance (Workspace + snowflakeR)](docs/artifact_repository_support_summary.md)
 - [Adding a New Language](docs/adding_a_language.md)
 
 ## Requirements
