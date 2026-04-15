@@ -235,6 +235,31 @@ Practical options:
 The `/etc/ssl/certs/...` examples below are **illustrative Linux paths**;
 under Workspace they are only valid if that file truly exists there.
 
+### How enterprises usually supply the CA
+
+The corporate **root or inspection CA is almost never a secret** in the
+same way as a password (it is public-key material), but your security team
+still controls **where** it is published and whether it may leave the
+network. Typical patterns:
+
+| Source | What it looks like | In Workspace |
+|---|---|---|
+| **Git (most common for notebooks)** | PKI or platform commits `certs/corp-root.pem` (or a merged bundle) into the **same private Git repo** that backs the Workspace. Rotation is a PR + redeploy. | Path is stable under the repo mount; point `ssl_cert_path` there. No extra egress. |
+| **Snowflake internal stage** | SecOps runs automation (`PUT`) to `@PROD_SECOPS.PKI.CORP_CA/root.pem`; RBAC grants `READ` to notebook roles. | First cell uses Snowpark / SQL to **download** the file to `/tmp/corp-ca.pem`, then YAML uses that path. EAI must allow any HTTPS host you call to fetch it, if you use HTTP at all. |
+| **Internal HTTPS “well-known” URL** | Many firms host the PEM at `https://pki.corp.example/ca.pem` or similar on the corporate intranet. | A bootstrap cell can `curl` or `urllib.request` **if** the notebook EAI allows that hostname and (when required) client auth is solvable. This is workable but more moving parts than Git or a stage. |
+| **Laptop → upload** | Analyst obtains the PEM from the intranet, uploads through Workspace/Snowsight if your UI supports it. | Operational; fine for pilots, brittle at scale. |
+
+**Order of operations:** whatever you choose, the PEM must **exist on
+disk before** `setup_notebook()` reads the YAML. A common pattern is
+**cell 1** (materialise cert → `/tmp/...` or confirm Git path) and
+**cell 2** `setup_notebook(config=...)`. Use the **same path** for
+`CURL_CA_BUNDLE` in cell 1 or 2 if R needs it.
+
+There is usually **no** “public global filesystem” for your company CA;
+it lives on **your** intranet, **your** Git default branch, or **your**
+Snowflake stage—then you **copy** it into the ephemeral Workspace file
+system for the session.
+
 This certificate is used by:
 - **micromamba** (`--ssl-verify` flag) for conda package downloads
 - **pip** (`--cert` flag) for PyPI package downloads
@@ -242,11 +267,12 @@ This certificate is used by:
 
 For CRAN packages, R uses its own SSL stack. If your CRAN mirror also
 requires a custom CA certificate, set the R environment variable in a
-setup cell before calling `setup_notebook()`:
+setup cell **before** calling `setup_notebook()`, using the **same path**
+as `ssl_cert_path`:
 
 ```python
 import os
-os.environ["CURL_CA_BUNDLE"] = "/etc/ssl/certs/corporate-ca-bundle.crt"
+os.environ["CURL_CA_BUNDLE"] = "/tmp/corp-ca.pem"  # example: match ssl_cert_path
 ```
 
 ## Authenticated Mirrors
