@@ -215,6 +215,26 @@ mirrors:
   ssl_cert_path: "/etc/ssl/certs/corporate-ca-bundle.crt"
 ```
 
+### Workspace Notebooks and CA bundles
+
+Workspace notebooks run in a **Snowflake-managed** container. Treat
+`ssl_cert_path` as any **POSIX path that exists in your session** when
+setup runs (the helper checks `os.path.isfile`). You generally **cannot**
+rely on baking files into `/etc/ssl/certs/` on the base image yourself.
+
+Practical options:
+
+- **Git-backed Workspace** — commit the corporate CA PEM in the
+  repository mounted for the notebook (for example `certs/corp-root.pem`)
+  and set `ssl_cert_path` to that mounted path.
+- **Upload or materialise a file** — add the PEM via Workspace/Snowsight,
+  or run a bootstrap cell before `setup_notebook()` to copy it from a
+  Snowflake stage to a path such as `/tmp/corp-ca.pem`, then reference
+  that path in YAML.
+
+The `/etc/ssl/certs/...` examples below are **illustrative Linux paths**;
+under Workspace they are only valid if that file truly exists there.
+
 This certificate is used by:
 - **micromamba** (`--ssl-verify` flag) for conda package downloads
 - **pip** (`--cert` flag) for PyPI package downloads
