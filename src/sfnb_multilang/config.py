@@ -91,6 +91,7 @@ class MirrorsConfig:
     """
     conda_channel: str = ""
     pypi_index: str = ""
+    pypi_extra_index: str = ""
     cran_mirror: str = ""
     micromamba_url: str = ""
     ssl_cert_path: str = ""
@@ -269,6 +270,7 @@ def _build_config(raw: dict) -> ToolkitConfig:
     cfg.mirrors = MirrorsConfig(
         conda_channel=str(mir_raw.get("conda_channel", "")),
         pypi_index=str(mir_raw.get("pypi_index", "")),
+        pypi_extra_index=str(mir_raw.get("pypi_extra_index", "")),
         cran_mirror=str(mir_raw.get("cran_mirror", "")),
         micromamba_url=str(mir_raw.get("micromamba_url", "")),
         ssl_cert_path=str(mir_raw.get("ssl_cert_path", "")),
@@ -343,6 +345,7 @@ def config_to_dict(cfg: ToolkitConfig) -> dict:
         "mirrors": {
             "conda_channel": cfg.mirrors.conda_channel,
             "pypi_index": cfg.mirrors.pypi_index,
+            "pypi_extra_index": cfg.mirrors.pypi_extra_index,
             "cran_mirror": cfg.mirrors.cran_mirror,
             "micromamba_url": cfg.mirrors.micromamba_url,
             "ssl_cert_path": cfg.mirrors.ssl_cert_path,

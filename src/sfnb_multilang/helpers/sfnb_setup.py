@@ -103,6 +103,7 @@ def _get_mirrors(cfg: dict) -> dict:
     return {
         "conda_channel": str(raw.get("conda_channel", "")),
         "pypi_index": str(raw.get("pypi_index", "")),
+        "pypi_extra_index": str(raw.get("pypi_extra_index", "")),
         "cran_mirror": str(raw.get("cran_mirror", "")),
         "micromamba_url": str(raw.get("micromamba_url", "")),
         "ssl_cert_path": str(raw.get("ssl_cert_path", "")),
@@ -111,8 +112,9 @@ def _get_mirrors(cfg: dict) -> dict:
 
 
 def _normalize_secret_path(raw: str) -> str:
-    """Accept ``db.schema.name`` or ``db/schema/name``; return slash form."""
-    return raw.replace(".", "/") if "/" not in raw else raw
+    """Accept ``db.schema.name`` or ``db/schema/name``; return lowercase slash form."""
+    path = raw.replace(".", "/") if "/" not in raw else raw
+    return path.lower()
 
 
 def _read_mirror_credentials(auth_secret: str) -> tuple[str, str]:
@@ -154,28 +156,35 @@ def _inject_auth_url(url: str, username: str, password: str) -> str:
     """Embed ``username:password@`` into a URL for basic-auth."""
     if not url or not username:
         return url
-    from urllib.parse import urlparse, urlunparse, quote
+    from urllib.parse import urlparse, quote
     parsed = urlparse(url)
     if parsed.username:
         return url
-    netloc = f"{quote(username, safe='')}:{quote(password, safe='')}@{parsed.hostname}"
+    userinfo = f"{quote(username, safe='')}:{quote(password, safe='')}"
+    host_port = parsed.hostname
     if parsed.port:
-        netloc += f":{parsed.port}"
-    return urlunparse(parsed._replace(netloc=netloc))
+        host_port += f":{parsed.port}"
+    result = f"{parsed.scheme}://{userinfo}@{host_port}{parsed.path}"
+    if parsed.query:
+        result += f"?{parsed.query}"
+    return result
 
 
 def _mask_url_credentials(url: str) -> str:
     """Replace ``user:pass@host`` with ``user:****@host`` for safe logging."""
     if not url:
         return url
-    from urllib.parse import urlparse, urlunparse
+    from urllib.parse import urlparse
     parsed = urlparse(url)
     if not parsed.password:
         return url
-    masked_netloc = f"{parsed.username}:****@{parsed.hostname}"
+    host_port = parsed.hostname
     if parsed.port:
-        masked_netloc += f":{parsed.port}"
-    return urlunparse(parsed._replace(netloc=masked_netloc))
+        host_port += f":{parsed.port}"
+    result = f"{parsed.scheme}://{parsed.username}:****@{host_port}{parsed.path}"
+    if parsed.query:
+        result += f"?{parsed.query}"
+    return result
 
 
 def _apply_mirror_auth(mirrors: dict) -> dict:
@@ -194,7 +203,7 @@ def _apply_mirror_auth(mirrors: dict) -> dict:
         return mirrors
 
     authed = dict(mirrors)
-    for key in ("conda_channel", "pypi_index", "cran_mirror", "micromamba_url"):
+    for key in ("conda_channel", "pypi_index", "pypi_extra_index", "cran_mirror", "micromamba_url"):
         if authed.get(key):
             authed[key] = _inject_auth_url(authed[key], username, password)
     return authed
@@ -223,10 +232,12 @@ def _apply_registry_env(cfg: dict, quiet: bool = False):
 
 
 def _pip_index_flags(mirrors: dict) -> list[str]:
-    """Build pip --index-url / --cert flags from mirrors config."""
+    """Build pip --index-url / --extra-index-url / --cert flags from mirrors config."""
     flags: list[str] = []
     if mirrors.get("pypi_index"):
         flags += ["--index-url", mirrors["pypi_index"]]
+    if mirrors.get("pypi_extra_index"):
+        flags += ["--extra-index-url", mirrors["pypi_extra_index"]]
     cert = mirrors.get("ssl_cert_path", "")
     if cert and os.path.isfile(cert):
         flags += ["--cert", cert]
@@ -473,6 +484,12 @@ def _get_rule_domains(session, rule_name: str) -> set[str]:
             except Exception:
                 d = {str(i): row[i] for i in range(len(row))}
             upper_d = {str(k).upper(): v for k, v in d.items()}
+
+            if "VALUE_LIST" in upper_d:
+                raw = str(upper_d["VALUE_LIST"])
+                if raw and "." in raw:
+                    return _parse_host_list(raw)
+
             prop_name = ""
             for k in ("NAME", "PROPERTY", "PROPERTY_NAME"):
                 if k in upper_d:
@@ -812,6 +829,7 @@ def ensure_eai(
     _auth_secret = mirrors.get("auth_secret", "")
 
     required = _domains_from_config(cfg)
+    _log(f"  Required domains: {required}", quiet=quiet)
 
     current_role = ""
     try:
@@ -844,6 +862,7 @@ def ensure_eai(
         covered = set()
         for doms in eai_domains.values():
             covered |= doms
+        _log(f"  Covered domains: {covered}", quiet=quiet)
         missing = required - covered
 
         if not missing:
@@ -1178,18 +1197,33 @@ def _resolve_tarball(
 ) -> str | None:
     if src:
         if src.startswith(("http://", "https://")):
-            dest = os.path.join(tempfile.gettempdir(), os.path.basename(src))
+            from urllib.parse import urlparse, urlunparse, unquote
+            import base64
+
+            parsed = urlparse(src)
+            headers = {"User-Agent": "sfnb-multilang"}
+            download_url = src
+            if parsed.username:
+                raw_user = unquote(parsed.username)
+                raw_pass = unquote(parsed.password or "")
+                token = base64.b64encode(f"{raw_user}:{raw_pass}".encode()).decode()
+                headers["Authorization"] = f"Basic {token}"
+                clean_netloc = parsed.hostname
+                if parsed.port:
+                    clean_netloc += f":{parsed.port}"
+                download_url = urlunparse(parsed._replace(netloc=clean_netloc))
+
+            dest = os.path.join(tempfile.gettempdir(), os.path.basename(parsed.path))
             _log(f"  {pkg}: downloading {_mask_url_credentials(src)}", quiet=quiet)
             try:
+                req = urllib.request.Request(download_url, headers=headers)
+                ctx = None
                 if ssl_cert_path and os.path.isfile(ssl_cert_path):
                     import ssl
                     ctx = ssl.create_default_context(cafile=ssl_cert_path)
-                    req = urllib.request.Request(src)
-                    with urllib.request.urlopen(req, context=ctx) as resp:
-                        with open(dest, "wb") as f:
-                            f.write(resp.read())
-                else:
-                    urllib.request.urlretrieve(src, dest)
+                with urllib.request.urlopen(req, context=ctx) as resp:
+                    with open(dest, "wb") as f:
+                        f.write(resp.read())
                 return dest
             except Exception as exc:
                 _log(f"  {pkg}: URL download failed ({exc}), "
@@ -1248,6 +1282,12 @@ def install_r_packages(
     tarballs: dict[str, str] = (
         cfg.get("languages", {}).get("r", {}).get("tarballs")
     ) or {}
+
+    auth_secret = mirrors.get("auth_secret", "")
+    if auth_secret:
+        user, pwd = _read_mirror_credentials(auth_secret)
+        if user:
+            tarballs = {k: _inject_auth_url(v, user, pwd) for k, v in tarballs.items()}
 
     core = [p for p in packages if p in _GITHUB_FALLBACKS]
     extras = [p for p in tarballs if p not in packages]

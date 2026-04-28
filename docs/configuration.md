@@ -114,6 +114,7 @@ for full setup instructions.
 |---|---|---|
 | `conda_channel` | `conda-forge` | Conda channel URL (Artifactory/Nexus conda remote) |
 | `pypi_index` | `pypi.org` | PyPI index URL (`--index-url` for pip) |
+| `pypi_extra_index` | (none) | Secondary PyPI index URL (`--extra-index-url` for pip) |
 | `cran_mirror` | `cloud.r-project.org` | CRAN mirror URL for `install.packages()` |
 | `micromamba_url` | `micro.mamba.pm` | Direct URL for micromamba binary download |
 | `ssl_cert_path` | system CA bundle | Path to CA cert bundle for TLS inspection proxies |

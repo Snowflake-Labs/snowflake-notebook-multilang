@@ -38,8 +38,9 @@ logger = logging.getLogger("sfnb_multilang.installer")
 # ---------------------------------------------------------------------------
 
 def _normalize_secret_path(raw: str) -> str:
-    """Accept ``db.schema.name`` or ``db/schema/name``; return slash form."""
-    return raw.replace(".", "/") if "/" not in raw else raw
+    """Accept ``db.schema.name`` or ``db/schema/name``; return lowercase slash form."""
+    path = raw.replace(".", "/") if "/" not in raw else raw
+    return path.lower()
 
 
 def read_mirror_credentials(auth_secret: str) -> tuple[str, str]:
@@ -84,28 +85,35 @@ def inject_auth_into_url(url: str, username: str, password: str) -> str:
     """Embed ``username:password@`` into a URL for basic-auth."""
     if not url or not username:
         return url
-    from urllib.parse import urlparse, urlunparse, quote
+    from urllib.parse import urlparse, quote
     parsed = urlparse(url)
     if parsed.username:
         return url
-    netloc = f"{quote(username, safe='')}:{quote(password, safe='')}@{parsed.hostname}"
+    userinfo = f"{quote(username, safe='')}:{quote(password, safe='')}"
+    host_port = parsed.hostname
     if parsed.port:
-        netloc += f":{parsed.port}"
-    return urlunparse(parsed._replace(netloc=netloc))
+        host_port += f":{parsed.port}"
+    result = f"{parsed.scheme}://{userinfo}@{host_port}{parsed.path}"
+    if parsed.query:
+        result += f"?{parsed.query}"
+    return result
 
 
 def mask_url_credentials(url: str) -> str:
     """Replace ``user:pass@host`` with ``user:****@host`` for safe logging."""
     if not url:
         return url
-    from urllib.parse import urlparse, urlunparse
+    from urllib.parse import urlparse
     parsed = urlparse(url)
     if not parsed.password:
         return url
-    masked_netloc = f"{parsed.username}:****@{parsed.hostname}"
+    host_port = parsed.hostname
     if parsed.port:
-        masked_netloc += f":{parsed.port}"
-    return urlunparse(parsed._replace(netloc=masked_netloc))
+        host_port += f":{parsed.port}"
+    result = f"{parsed.scheme}://{parsed.username}:****@{host_port}{parsed.path}"
+    if parsed.query:
+        result += f"?{parsed.query}"
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -242,6 +250,7 @@ class Installer:
             self._install_pip_packages(
                 all_pip_packages,
                 pypi_index=_auth_url(mirrors.pypi_index),
+                pypi_extra_index=_auth_url(mirrors.pypi_extra_index),
                 ssl_cert_path=mirrors.ssl_cert_path,
             )
         else:
@@ -319,6 +328,7 @@ class Installer:
         self,
         packages: list[str],
         pypi_index: str = "",
+        pypi_extra_index: str = "",
         ssl_cert_path: str = "",
     ) -> None:
         """Install pip packages into the notebook kernel."""
@@ -327,6 +337,10 @@ class Installer:
             logger.info("  Using custom PyPI index: %s",
                         mask_url_credentials(pypi_index))
             index_flags = ["--index-url", pypi_index]
+        if pypi_extra_index:
+            logger.info("  Using extra PyPI index: %s",
+                        mask_url_credentials(pypi_extra_index))
+            index_flags += ["--extra-index-url", pypi_extra_index]
         if ssl_cert_path and os.path.isfile(ssl_cert_path):
             index_flags += ["--cert", ssl_cert_path]
 
@@ -337,8 +351,22 @@ class Installer:
                     ["python3", "-m", "pip", "install", pkg, "-q"] + index_flags,
                     description=f"pip install {pkg}",
                 )
+                logger.info("  %s: installed OK", pkg)
+            except Exception as exc:
+                logger.warning("  %s: install failed (%s)", pkg, exc)
+
+        logger.info("  Verifying installed pip packages...")
+        for pkg in packages:
+            base = pkg.split("=")[0].split(">")[0].split("<")[0].split("[")[0]
+            module_name = base.replace("-", "_").replace("_", ".", 1) if "-" in base else base.replace("-", "_")
+            try:
+                run_cmd(
+                    ["python3", "-c", f"import {module_name}; print('{base}: ok')"],
+                    description=f"verify {base}",
+                )
+                logger.info("  %s: import OK", base)
             except Exception:
-                logger.warning("  %s: install failed (may still work)", pkg)
+                logger.warning("  %s: import FAILED (module: %s)", base, module_name)
 
     # -----------------------------------------------------------------
     # Network rules (Phase 0)

@@ -55,6 +55,7 @@ Add a `mirrors` section to your `_config.yaml`:
 mirrors:
   conda_channel: "https://artifactory.snowflake.com/conda-forge-remote"
   pypi_index: "https://artifactory.snowflake.com/api/pypi/pypi-remote/simple"
+  pypi_extra_index: "https://artifactory.snowflake.com/api/pypi/internal-packages/simple"  # optional secondary index
   cran_mirror: "https://artifactory.snowflake.com/cran-remote"
   micromamba_url: "https://artifactory.snowflake.com/generic-tools/micromamba/linux-64/latest"
   ssl_cert_path: "/etc/ssl/certs/corporate-ca-bundle.crt"
@@ -68,6 +69,7 @@ All fields are optional. Omitted fields fall back to the public default.
 |---|---|---|---|
 | `conda_channel` | Conda channel | `conda-forge` | URL to a Conda remote/virtual repo that proxies `conda-forge` |
 | `pypi_index` | PEP 503 Simple API | `https://pypi.org/simple` | URL to a PyPI remote repo |
+| `pypi_extra_index` | PEP 503 Simple API | (none) | Secondary PyPI index URL; passed as `--extra-index-url` to pip alongside `pypi_index` |
 | `cran_mirror` | CRAN repo | `https://cloud.r-project.org` | URL to a CRAN remote repo |
 | `micromamba_url` | HTTP(S) binary download | `micro.mamba.pm` / GitHub | Direct URL to a micromamba binary or `.tar.bz2` archive |
 | `ssl_cert_path` | N/A | system default | Path to a CA certificate bundle for TLS inspection proxies |
@@ -97,6 +99,7 @@ env_name: "workspace_env"
 mirrors:
   conda_channel: "https://artifactory.snowflake.com/conda-forge-remote"
   pypi_index: "https://artifactory.snowflake.com/api/pypi/pypi-remote/simple"
+  pypi_extra_index: ""  # optional: secondary PyPI index (--extra-index-url)
   cran_mirror: "https://artifactory.snowflake.com/cran-remote"
   micromamba_url: "https://artifactory.snowflake.com/generic-tools/micromamba/linux-64/latest"
   ssl_cert_path: "/etc/ssl/certs/corporate-ca-bundle.crt"

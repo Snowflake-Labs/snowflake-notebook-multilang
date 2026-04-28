@@ -144,11 +144,27 @@ def _download_custom_url(binary_path: str, url: str, ssl_cert_path: str = "") ->
     else:
         ctx = None
 
+    from urllib.parse import urlparse, urlunparse
+    import base64
+
+    parsed = urlparse(url)
+    headers = {"User-Agent": "sfnb-multilang"}
+    if parsed.username:
+        from urllib.parse import unquote
+        raw_user = unquote(parsed.username)
+        raw_pass = unquote(parsed.password or "")
+        token = base64.b64encode(f"{raw_user}:{raw_pass}".encode()).decode()
+        headers["Authorization"] = f"Basic {token}"
+        clean_netloc = parsed.hostname
+        if parsed.port:
+            clean_netloc += f":{parsed.port}"
+        url = urlunparse(parsed._replace(netloc=clean_netloc))
+
     with tempfile.NamedTemporaryFile(delete=False) as tmp:
         tmp_path = tmp.name
 
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "sfnb-multilang"})
+        req = urllib.request.Request(url, headers=headers)
         kwargs = {"timeout": 120}
         if ctx:
             kwargs["context"] = ctx

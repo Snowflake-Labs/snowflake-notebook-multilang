@@ -340,11 +340,14 @@ def _get_eai_rule_names(session, eai_name: str) -> list[str]:
 def _get_rule_domains(session, rule_name: str) -> set[str]:
     """Get the current domain set from an existing network rule.
 
-    Tries multiple column-name conventions across Snowflake versions,
-    then falls back to scanning every string value for hostname patterns.
+    Handles both:
+      - Column-based output (name, type, mode, value_list)
+      - Property-based output (property, property_value)
+    Then falls back to scanning every string value for hostname patterns.
     """
     try:
         rows = session.sql(f"DESCRIBE NETWORK RULE {rule_name}").collect()
+
         for row in rows:
             try:
                 d = row.as_dict()
@@ -352,6 +355,11 @@ def _get_rule_domains(session, rule_name: str) -> set[str]:
                 d = {str(i): row[i] for i in range(len(row))}
 
             upper_d = {str(k).upper(): v for k, v in d.items()}
+
+            if "VALUE_LIST" in upper_d:
+                raw = str(upper_d["VALUE_LIST"])
+                if raw and "." in raw:
+                    return _parse_host_list(raw)
 
             prop_name = ""
             for k in ("NAME", "PROPERTY", "PROPERTY_NAME"):
@@ -375,7 +383,6 @@ def _get_rule_domains(session, rule_name: str) -> set[str]:
             if raw:
                 return _parse_host_list(raw)
 
-        # Fallback: scan all values for comma-separated hostnames
         for row in rows:
             try:
                 d = row.as_dict()

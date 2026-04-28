@@ -103,6 +103,10 @@ class RPlugin(LanguagePlugin):
     def post_install(self, env_prefix: str, config: ToolkitConfig) -> PluginResult:
         r_cfg = config.r
         cran_mirror = config.mirrors.cran_mirror or "https://cloud.r-project.org"
+        cran_user, cran_token = "", ""
+        if config.mirrors.auth_secret:
+            from ..installer import read_mirror_credentials
+            cran_user, cran_token = read_mirror_credentials(config.mirrors.auth_secret)
         warnings: list[str] = []
 
         # Fix library symlinks (libz.so, liblzma.so)
@@ -114,7 +118,7 @@ class RPlugin(LanguagePlugin):
 
         # Install CRAN packages
         if r_cfg.cran_packages:
-            self._install_cran_packages(env_prefix, r_cfg.cran_packages, cran_mirror=cran_mirror)
+            self._install_cran_packages(env_prefix, r_cfg.cran_packages, cran_mirror=cran_mirror, auth_user=cran_user, auth_token=cran_token)
 
         # Optional add-ons (these add significant install time)
         if r_cfg.addons.get("adbc"):
@@ -238,10 +242,22 @@ class RPlugin(LanguagePlugin):
         env_prefix: str,
         packages: list[str],
         cran_mirror: str = "https://cloud.r-project.org",
+        auth_user: str = "",
+        auth_token: str = "",
     ) -> None:
-        """Install CRAN packages via R's install.packages()."""
+        """Install CRAN packages via R's install.packages().
+
+        When auth_user is set, a Basic auth header is passed via the
+        ``headers`` parameter of ``install.packages()`` (R >= 4.1.0).
+        This is the officially recommended method for authenticated
+        CRAN-like repos (e.g. JFrog Artifactory).  No temp files, no
+        env vars, no URL mangling.
+        """
+        import base64
+
         logger.info("  Installing CRAN packages (repo: %s)...", cran_mirror)
         r_bin = os.path.join(env_prefix, "bin", "R")
+        logger.info("  R binary: %s (exists: %s)", r_bin, os.path.isfile(r_bin))
 
         latest = [p for p in packages if "==" not in str(p)]
         versioned = {}
@@ -250,32 +266,72 @@ class RPlugin(LanguagePlugin):
                 name, ver = str(p).split("==", 1)
                 versioned[name.strip()] = ver.strip()
 
+        logger.info("  CRAN latest: %d packages, versioned: %d packages", len(latest), len(versioned))
+
+        auth_header_r = ""
+        if auth_user:
+            from urllib.parse import unquote
+            b64 = base64.b64encode(f"{unquote(auth_user)}:{unquote(auth_token)}".encode()).decode()
+            auth_header_r = f', headers=c(Authorization="Basic {b64}")'
+            logger.info("  CRAN auth: using Basic auth header")
+
         if latest:
             pkg_vec = ", ".join(f'"{p}"' for p in latest)
             r_code = textwrap.dedent(f"""\
                 pkgs <- c({pkg_vec})
                 installed <- rownames(installed.packages())
                 missing <- setdiff(pkgs, installed)
+                message("Total requested: ", length(pkgs))
+                message("Already installed: ", length(intersect(pkgs, installed)))
+                message("Missing: ", length(missing))
                 if (length(missing) > 0) {{
                     message("Installing CRAN packages: ", paste(missing, collapse=", "))
-                    install.packages(missing, repos="{cran_mirror}", quiet=TRUE)
+                    install.packages(missing, repos="{cran_mirror}", quiet=TRUE{auth_header_r})
                 }} else {{
                     message("All CRAN packages already installed")
                 }}
+                installed_after <- rownames(installed.packages())
+                succeeded <- intersect(pkgs, installed_after)
+                failed <- setdiff(pkgs, installed_after)
+                message("CRAN install check: ", length(succeeded), "/", length(pkgs), " packages OK")
+                if (length(succeeded) > 0) {{
+                    message("  Installed: ", paste(succeeded, collapse=", "))
+                }}
+                if (length(failed) > 0) {{
+                    message("  FAILED: ", paste(failed, collapse=", "))
+                }}
             """)
-            run_cmd([r_bin, "--vanilla", "--quiet", "-e", r_code],
-                    description="Install CRAN packages (latest)")
+            logger.info("  Running R install.packages()...")
+            result = run_cmd([r_bin, "--vanilla", "--quiet", "-e", r_code],
+                    description="Install CRAN packages (latest)",
+                    check=False)
+            logger.info("  R install exit code: %d", result.returncode)
+            if result.stderr:
+                for line in result.stderr.strip().splitlines():
+                    logger.info("  [R] %s", line)
+            logger.info("  CRAN latest-version install step complete")
 
         if versioned:
             for pkg_name, pkg_version in versioned.items():
+                logger.info("  Installing versioned: %s==%s", pkg_name, pkg_version)
                 r_code = textwrap.dedent(f"""\
                     if (!requireNamespace("remotes", quietly=TRUE))
-                        install.packages("remotes", repos="{cran_mirror}", quiet=TRUE)
+                        install.packages("remotes", repos="{cran_mirror}", quiet=TRUE{auth_header_r})
                     remotes::install_version("{pkg_name}", version="{pkg_version}",
                         repos="{cran_mirror}", quiet=TRUE, upgrade="never")
+                    if (requireNamespace("{pkg_name}", quietly=TRUE)) {{
+                        v <- as.character(packageVersion("{pkg_name}"))
+                        message("  OK: {pkg_name} ", v, " installed")
+                    }} else {{
+                        message("  FAILED: {pkg_name}=={pkg_version} not found after install")
+                    }}
                 """)
-                run_cmd([r_bin, "--vanilla", "--quiet", "-e", r_code],
+                result = run_cmd([r_bin, "--vanilla", "--quiet", "-e", r_code],
                         description=f"Install CRAN {pkg_name}=={pkg_version}")
+                if result.stderr:
+                    for line in result.stderr.strip().splitlines():
+                        logger.info("  [R] %s", line)
+            logger.info("  CRAN versioned install step complete")
 
     @retry(max_attempts=2, delay=3)
     def _install_adbc(self, env_prefix: str, env_name: str, cran_mirror: str = "https://cloud.r-project.org") -> None:
