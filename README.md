@@ -1,5 +1,13 @@
 # snowflake-notebook-multilang
 
+> **Community Project -- Not Officially Supported**
+> This is a community-developed project from
+> [Snowflake Labs](https://github.com/Snowflake-Labs), not an official
+> Snowflake offering. It is provided **as-is** without warranty or official
+> Snowflake support. Use it for prototyping and experimentation; production
+> use is at your own risk. Feedback, bug reports, and contributions are
+> welcome via [GitHub Issues](https://github.com/Snowflake-Labs/snowflake-notebook-multilang/issues).
+
 Multi-language support (R, Scala/Java, Julia) for Snowflake Workspace Notebooks.
 
 This toolkit installs and configures language runtimes, packages, and
