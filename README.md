@@ -1,5 +1,11 @@
 # snowflake-notebook-multilang <img src="docs/logo.png" align="right" height="139" />
 
+Multi-language support (R, Scala/Java, Julia) for Snowflake Workspace Notebooks.
+
+This toolkit installs and configures language runtimes, packages, and
+notebook magic commands so you can use R, Scala, Java, and Julia alongside
+Python in Snowflake Workspace Notebooks.
+
 > **Community Project -- Not Officially Supported**
 > This is a community-developed project from
 > [Snowflake Labs](https://github.com/Snowflake-Labs), not an official
@@ -9,12 +15,6 @@
 > welcome via [GitHub Issues](https://github.com/Snowflake-Labs/snowflake-notebook-multilang/issues).
 
 > **Author:** [Simon Field](https://www.linkedin.com/in/fieldy6961) — SnowCAT
-
-Multi-language support (R, Scala/Java, Julia) for Snowflake Workspace Notebooks.
-
-This toolkit installs and configures language runtimes, packages, and
-notebook magic commands so you can use R, Scala, Java, and Julia alongside
-Python in Snowflake Workspace Notebooks.
 
 ## Quick Start
 
