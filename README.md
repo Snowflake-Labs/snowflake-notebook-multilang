@@ -1,6 +1,4 @@
-# snowflake-notebook-multilang
-
-<img src="docs/logo.png" align="right" height="139" />
+# snowflake-notebook-multilang <img src="docs/logo.png" align="right" height="139" />
 
 > **Community Project -- Not Officially Supported**
 > This is a community-developed project from
@@ -9,6 +7,8 @@
 > Snowflake support. Use it for prototyping and experimentation; production
 > use is at your own risk. Feedback, bug reports, and contributions are
 > welcome via [GitHub Issues](https://github.com/Snowflake-Labs/snowflake-notebook-multilang/issues).
+
+> **Author:** [Simon Field](https://www.linkedin.com/in/fieldy6961) — SnowCAT
 
 Multi-language support (R, Scala/Java, Julia) for Snowflake Workspace Notebooks.
 
