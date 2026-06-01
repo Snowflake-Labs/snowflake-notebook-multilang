@@ -1,0 +1,53 @@
+# Custom Runtime Image: R + snowflakeR/RSnowflake pre-baked for Workspace Notebooks
+#
+# Extends the official snowbooks ML runtime base (required for CRE validation).
+# See docs/custom_runtime_images.md for build/push/register workflow.
+#
+# Build (replace REGISTRY_URL with your account registry from `snow spcs image-registry login`):
+#   docker build --platform linux/amd64 \
+#     --build-arg REGISTRY_URL=<account>.registry.snowflakecomputing.com \
+#     -f docker/Dockerfile.multilang-r \
+#     -t sfnb-multilang-r:v1 .
+
+ARG REGISTRY_URL
+ARG SNOWBOOKS_TAG=2.5.0
+
+FROM ${REGISTRY_URL}/snowflake/images/snowflake_images/st_plat/runtime/x86/runtime_image/snowbooks:${SNOWBOOKS_TAG}
+
+# CRE validation requires this env var on custom images.
+ENV DASHBOARD_PORT=12003
+# Signals to setup_notebook() that runtime install can be skipped when healthy.
+ENV SFNB_CUSTOM_RUNTIME=1
+ENV TZ=UTC
+ENV SFNB_ENV_NAME=workspace_env
+ENV SFNB_MICROMAMBA_ROOT=/home/jupyter/micromamba
+ENV SFNB_CONFIG_PATH=/opt/sfnb/config/cre_multilang_r.yaml
+ENV SFNB_HELPERS_PATH=/opt/sfnb/helpers
+ENV SFNB_CRE_VERSION=v2
+ENV SFNB_CRE_ADBC=1
+
+USER root
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    bzip2 \
+    ca-certificates \
+    unzip \
+    build-essential \
+    pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY docker/install_prebaked_r.sh /tmp/install_prebaked_r.sh
+COPY docker/generated/cre_extra_install.sh /tmp/cre_extra_install.sh
+COPY pyproject.toml README.md /tmp/sfnb-pkg/
+COPY src /tmp/sfnb-pkg/src
+COPY configs/cre_multilang_r.yaml /tmp/cre_multilang_r.yaml
+COPY docker/cre_ipython_startup/00-sfnb-enable-r.py /tmp/00-sfnb-enable-r.py
+ARG SFNB_CRE_IMAGE_TAG=v2
+ARG SFNB_CRE_ADBC=1
+RUN chmod +x /tmp/install_prebaked_r.sh /tmp/cre_extra_install.sh \
+    && SFNB_CRE_IMAGE_TAG="${SFNB_CRE_IMAGE_TAG}" SFNB_CRE_ADBC="${SFNB_CRE_ADBC}" bash /tmp/install_prebaked_r.sh \
+    && rm -rf /tmp/install_prebaked_r.sh /tmp/cre_extra_install.sh /tmp/sfnb-pkg /tmp/cre_multilang_r.yaml /tmp/00-sfnb-enable-r.py
+
+# Default snowbooks entrypoint must remain unchanged for CRE server-side validation.
+# Do not override ENTRYPOINT or CMD.

@@ -1,0 +1,53 @@
+# =============================================================================
+# CRE profile — copy to cre_profile.yaml and customize (do not commit secrets)
+# =============================================================================
+# Build:
+#   cp configs/cre_profile.example.yaml configs/cre_profile.yaml
+#   # edit cre_profile.yaml
+#   ./docker/create_cre.sh configs/cre_profile.yaml
+#
+#   PUSH=1 SNOW_CONNECTION=my_conn ./docker/create_cre.sh configs/cre_profile.yaml
+# =============================================================================
+
+cre:
+  # Snowflake Custom Runtime Environment name (SQL identifier)
+  name: sfnb_multilang_r
+  # Docker image name:tag (also used for CRE IMAGE_PATH tail)
+  image: sfnb-multilang-r
+  tag: v2
+  # Label stamped in /opt/sfnb/CRE_VERSION inside the image
+  version_label: v2
+  r_version: "4.5.2"
+  snowbooks_tag: "2.5.0"
+  # Bake ADBC (adbcsnowflake) — adds ~2–3 min to image build
+  adbc: true
+
+snowflake:
+  # Account image registry host (from SHOW IMAGE REPOSITORIES / Snowsight)
+  registry_url: "<account>.registry.snowflakecomputing.com"
+  # Lowercase path: database/schema/repository (no leading slash)
+  image_repo_path: mydb/myschema/my_cre_images
+
+# Optional: override snowflakeR / RSnowflake tarball URLs at build time
+tarballs:
+  snowflakeR: "https://github.com/Snowflake-Labs/snowflakeR/releases/download/v0.1.0/snowflakeR_0.1.0.tar.gz"
+  RSnowflake: "https://github.com/Snowflake-Labs/RSnowflake/releases/download/v0.2.0/RSnowflake_0.2.0.tar.gz"
+
+# Extra packages baked into the image (beyond the v2 defaults)
+extras:
+  # conda-forge specs installed into workspace_env after base create
+  conda_r: []
+  # Examples:
+  #   - r-fable
+  #   - r-lme4
+  #   - r-forecast
+
+  # CRAN package names (installed with install.packages at build time)
+  cran: []
+  cran_mirror: "https://cloud.r-project.org"
+
+  # pip packages for the snowbooks notebook Python kernel
+  pip: []
+  # Examples:
+  #   - scikit-learn>=1.3
+  #   - prophet

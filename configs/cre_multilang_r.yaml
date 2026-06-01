@@ -1,0 +1,52 @@
+# =============================================================================
+# Custom Runtime Environment (CRE) — R + snowflakeR + ADBC preset (image tag v2+)
+# =============================================================================
+# Use with a Workspace Notebook backed by cre@sfnb_multilang_r (or your CRE
+# name). The CRE image pre-installs micromamba, workspace_env, snowflakeR,
+# RSnowflake, ADBC, rpy2, sfnb-multilang, and auto-registers %%R at kernel
+# start (empty git repo is fine).
+#
+# Build/register: see docs/custom_runtime_images.md
+#
+# Usage (setup cell — same as always):
+#   from sfnb_setup import setup_notebook
+#   setup_notebook(config="cre_multilang_r.yaml", packages=["snowflakeR", "RSnowflake"])
+# =============================================================================
+
+env_name: "workspace_env"
+micromamba_root: "~/micromamba"
+
+# Optional: reduce EAI domain checks when nothing is downloaded at runtime.
+# Leave commented if you install extra CRAN packages or bump tarballs in-session.
+# custom_runtime:
+#   skip_eai_when_prebaked: true
+
+languages:
+  r:
+    enabled: true
+    r_version: "4.5.2"
+    conda_packages:
+      - r-cli
+      - r-rlang>=1.0.0
+      - r-reticulate>=1.25
+      - r-tidyverse
+      - r-dbplyr
+      - r-httr2>=1.0.0
+      - r-lazyeval
+      - r-dbi>=1.2.0
+      - r-jsonlite
+      - r-dplyr>=1.1.0
+    cran_packages: []
+    addons:
+      adbc: true   # baked into CRE v2+ (go + libadbc-driver-snowflake + adbcsnowflake)
+      duckdb: false
+    # Tarballs are baked into the CRE image; URLs are fallback only.
+    tarballs:
+      snowflakeR: "https://github.com/Snowflake-Labs/snowflakeR/releases/download/v0.1.0/snowflakeR_0.1.0.tar.gz"
+      RSnowflake: "https://github.com/Snowflake-Labs/RSnowflake/releases/download/v0.2.0/RSnowflake_0.2.0.tar.gz"
+
+  scala:
+    enabled: false
+
+  julia:
+    enabled: false

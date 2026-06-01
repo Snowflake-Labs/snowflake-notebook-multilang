@@ -14,11 +14,22 @@ Python in Snowflake Workspace Notebooks.
 > use is at your own risk. Feedback, bug reports, and contributions are
 > welcome via [GitHub Issues](https://github.com/Snowflake-Labs/snowflake-notebook-multilang/issues).
 
-> **Author:** [Simon Field](https://www.linkedin.com/in/fieldy6961) — SnowCAT
+## Implementation guide
+
+**[The Hitchhiker's Guide to R in Snowflake](https://snowflake-labs.github.io/snowflakeR/)** — Workspace bootstrap, EAI, `%%R` cells, and optional Julia/Scala/Java. Hosted in the [snowflakeR](https://github.com/Snowflake-Labs/snowflakeR) repository.
 
 ## Quick Start
 
-The fastest way to get R running in a Workspace Notebook is the all-in-one
+### Organisation rollout: CRE onboarding (platform / IT)
+
+For enterprise rollouts, **platform or IT** builds a shared image with
+`docker/create_cre.sh`, registers `cre@<org_name>`, and grants roles; analysts
+attach the CRE in Workspace — **near-instant `%%R`** on v2 (no setup cell). See
+[Organisation operating model](docs/org_cre_operating_model.md).
+
+### First notebook / no CRE yet: bootstrap
+
+The fastest way to get R running **without Docker** is the all-in-one
 `setup_notebook()` function from `sfnb_setup.py`:
 
 ```python
@@ -163,6 +174,7 @@ Ready-made configs in the `configs/` directory:
 | `scala_only.yaml` | Scala/Java |
 | `julia_only.yaml` | Julia |
 | `r_scala.yaml` | R + Scala/Java |
+| `cre_multilang_r.yaml` | R preset for Custom Runtime Images (pre-baked) |
 
 ## Network Rules (EAI)
 
@@ -187,9 +199,34 @@ The `examples/` directory contains ready-to-run Workspace Notebooks:
 Each example includes a README with setup instructions, EAI configuration,
 and all files needed to upload to a Workspace Notebook.
 
+## Custom Runtime Images (faster bootstrap)
+
+Pre-bake micromamba, R, and snowflakeR/RSnowflake into a [Custom Runtime
+Environment](https://docs.snowflake.com/en/developer-guide/snowflake-ml/custom-runtime-images)
+so `setup_notebook()` skips the ~60s typical bootstrap on every compute restart:
+
+```bash
+./docker/create_cre.sh --init                    # copy configs/cre_profile.example.yaml
+# edit configs/cre_profile.yaml (registry, extras.cran, extras.conda_r, …)
+PUSH=1 ./docker/create_cre.sh configs/cre_profile.yaml
+```
+
+Or build without a profile: `export REGISTRY_URL=...; ./docker/build_cre.sh`
+
+Attach `cre@sfnb_multilang_r` in Workspace advanced settings and use
+`configs/cre_multilang_r.yaml`.
+
+**Organisation docs:**
+
+- [Custom Runtime Images](docs/custom_runtime_images.md) — build, register, v2 catalog
+- [CRE vs bootstrap matrix](docs/cre_path_matrix.md)
+- [Organisation operating model](docs/org_cre_operating_model.md)
+- [CRE notebook template (no setup cell)](examples/cre_workspace_notebook_template.md)
+
 ## Documentation
 
 - [Quick Start Guide](docs/quickstart.md)
+- [Custom Runtime Images](docs/custom_runtime_images.md)
 - [Configuration Reference](docs/configuration.md)
 - [Network Rules](docs/network_rules.md)
 - [Custom Mirrors (Artifactory / Nexus)](docs/custom_mirrors.md)

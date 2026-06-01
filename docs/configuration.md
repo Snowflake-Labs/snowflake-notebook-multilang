@@ -59,6 +59,19 @@ setup_notebook(packages=["snowflakeR"])
 | `micromamba_root` | `~/micromamba` | Where micromamba is installed |
 | `force_reinstall` | `false` | Skip "already installed" checks |
 
+### Custom Runtime (`custom_runtime`)
+
+Use with a [Custom Runtime Environment](custom_runtime_images.md) that
+pre-installs micromamba and R (see `docker/Dockerfile.multilang-r`).
+
+| Key | Default | Description |
+|---|---|---|
+| `prebaked` | `false` | Treat the container as pre-baked (skip tarball reinstall when packages exist) |
+| `skip_eai_when_prebaked` | `false` | Skip EAI discovery when `prebaked` is true |
+
+Images built with `docker/Dockerfile.multilang-r` set `SFNB_CUSTOM_RUNTIME=1`,
+which enables the fast path automatically. Preset: `configs/cre_multilang_r.yaml`.
+
 ## Languages
 
 ### R (`languages.r`)

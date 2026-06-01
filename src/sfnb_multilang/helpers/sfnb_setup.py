@@ -1170,13 +1170,39 @@ from sfnb_multilang import install  # noqa: E402
 
 def install_r(**kwargs):
     """Install R and register the %%R magic."""
-    kwargs.setdefault("languages", ["r"])
-    install(**kwargs)
+    config = kwargs.get("config")
+    cfg = _read_config(config) if config else {}
+    quiet = kwargs.get("quiet", False)
+    if _is_prebaked_custom_runtime(cfg):
+        _log("  Pre-baked R (CRE): skipping micromamba install", quiet=quiet)
+    else:
+        kwargs.setdefault("languages", ["r"])
+        install(**kwargs)
     try:
         from sfnb_multilang.helpers.r_helpers import setup_r_environment
     except ImportError:
         from r_helpers import setup_r_environment
-    setup_r_environment()
+    result = setup_r_environment()
+    if not result.get("success"):
+        raise RuntimeError(
+            "Failed to enable R cells: "
+            + "; ".join(result.get("errors") or ["unknown"])
+        )
+    return result
+
+
+def setup_r_environment(*args, **kwargs):
+    """Enable ``%%R`` cells (re-exported from ``r_helpers``)."""
+    try:
+        from sfnb_multilang.helpers.r_helpers import setup_r_environment as _fn
+    except ImportError:
+        from r_helpers import setup_r_environment as _fn
+    return _fn(*args, **kwargs)
+
+
+def enable_r_cells(*args, **kwargs):
+    """Alias for ``setup_r_environment()`` — use in CRE setup cells."""
+    return setup_r_environment(*args, **kwargs)
 
 
 # ==========================================================================
@@ -1187,6 +1213,38 @@ _GITHUB_FALLBACKS = {
     "snowflakeR": "Snowflake-Labs/snowflakeR",
     "RSnowflake": "Snowflake-Labs/RSnowflake",
 }
+
+
+def _custom_runtime_cfg(cfg: dict) -> dict:
+    """Return the optional ``custom_runtime`` section from notebook config."""
+    raw = cfg.get("custom_runtime")
+    return raw if isinstance(raw, dict) else {}
+
+
+def _is_prebaked_custom_runtime(cfg: dict | None = None) -> bool:
+    """True when a CRE image (or equivalent) already has micromamba + R ready."""
+    if os.environ.get("SFNB_CUSTOM_RUNTIME", "").strip() in ("1", "true", "yes"):
+        return True
+    if cfg and _custom_runtime_cfg(cfg).get("prebaked"):
+        return True
+    mm = os.path.expanduser("~/micromamba/bin/micromamba")
+    if not os.path.isfile(mm) or not os.access(mm, os.X_OK):
+        return False
+    marker = os.path.expanduser("~/.workspace_env_prefix")
+    if os.path.isfile(marker):
+        prefix = open(marker).read().strip()
+        r_bin = os.path.join(prefix, "bin", "R")
+        return os.path.isfile(r_bin)
+    return False
+
+
+def _r_pkg_installed(pkg: str) -> bool:
+    """Return True if an R package is already loadable in the active env."""
+    try:
+        from rpy2.robjects import r as R
+        return bool(R(f'requireNamespace("{pkg}", quietly=TRUE)')[0])
+    except Exception:
+        return False
 
 
 def _resolve_tarball(
@@ -1293,6 +1351,9 @@ def install_r_packages(
     extras = [p for p in tarballs if p not in packages]
 
     for pkg in core:
+        if _r_pkg_installed(pkg):
+            _log(f"  {pkg}: already installed (skipping)", quiet=quiet)
+            continue
         path = _resolve_tarball(pkg, tarballs.get(pkg), quiet=quiet, ssl_cert_path=ssl_cert)
         if path:
             _log(f"  {pkg} <- {path}", quiet=quiet)
@@ -1304,6 +1365,9 @@ def install_r_packages(
             _log(f"  {pkg}: WARNING could not resolve", quiet=quiet)
 
     for pkg in extras:
+        if _r_pkg_installed(pkg):
+            _log(f"  {pkg}: already installed (skipping)", quiet=quiet)
+            continue
         path = _resolve_tarball(pkg, tarballs.get(pkg), quiet=quiet, ssl_cert_path=ssl_cert)
         if path:
             _log(f"  {pkg} <- {path}", quiet=quiet)
@@ -1390,9 +1454,24 @@ def setup_notebook(
     effective_ctx = _set_session_context(session, cfg, quiet=quiet)
 
     # -- 2. EAI validation -------------------------------------------------
-    _log("\n--- EAI validation ---", quiet=quiet)
-    eai_result = ensure_eai(session=session, config=config, quiet=quiet)
-    eai_action = eai_result.get("action", "no_change")
+    prebaked = _is_prebaked_custom_runtime(cfg)
+    skip_eai = (
+        prebaked
+        and _custom_runtime_cfg(cfg).get("skip_eai_when_prebaked", False)
+    )
+    if prebaked:
+        _log("\n--- Custom runtime (pre-baked) ---", quiet=quiet)
+        _log("  micromamba + R detected in image (fast bootstrap path)",
+             quiet=quiet)
+    if skip_eai:
+        _log("\n--- EAI validation ---", quiet=quiet)
+        _log("  Skipped (custom_runtime.skip_eai_when_prebaked)", quiet=quiet)
+        eai_result = {"action": "skipped", "eai_name": "(pre-baked CRE)"}
+        eai_action = "skipped"
+    else:
+        _log("\n--- EAI validation ---", quiet=quiet)
+        eai_result = ensure_eai(session=session, config=config, quiet=quiet)
+        eai_action = eai_result.get("action", "no_change")
 
     if eai_action == "print_sql":
         _log("\nSetup paused: EAI requires admin action (see SQL above).",
