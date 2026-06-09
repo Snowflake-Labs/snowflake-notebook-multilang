@@ -238,6 +238,11 @@ def _build_config(raw: dict) -> ToolkitConfig:
     cfg = ToolkitConfig()
     cfg.env_name = str(raw.get("env_name", cfg.env_name))
     cfg.micromamba_root = str(raw.get("micromamba_root", cfg.micromamba_root))
+    # CRE images set SFNB_MICROMAMBA_ROOT=/home/jupyter/micromamba; YAML often
+    # uses ~/micromamba which expands to /root/micromamba and breaks pre-baked envs.
+    cre_mm = os.environ.get("SFNB_MICROMAMBA_ROOT", "").strip()
+    if cre_mm:
+        cfg.micromamba_root = cre_mm
     cfg.force_reinstall = bool(raw.get("force_reinstall", False))
 
     # Languages can be nested under "languages:" or at top level

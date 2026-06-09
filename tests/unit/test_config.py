@@ -41,6 +41,16 @@ class TestLoadConfig:
         with pytest.raises(ConfigError, match="not found"):
             load_config("/nonexistent/path.yaml")
 
+    def test_cre_micromamba_root_env_override(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("SFNB_MICROMAMBA_ROOT", "/home/jupyter/micromamba")
+        path = self._write_yaml(
+            {"micromamba_root": "~/micromamba", "languages": {"r": {"enabled": True}}},
+            str(tmp_path),
+        )
+        cfg = load_config(path)
+        assert cfg.micromamba_root == "/home/jupyter/micromamba"
+        assert cfg.micromamba_root_expanded == "/home/jupyter/micromamba"
+
     def test_full_config(self, tmp_path):
         data = {
             "env_name": "my_env",

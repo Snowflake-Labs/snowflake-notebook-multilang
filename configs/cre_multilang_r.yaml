@@ -14,7 +14,8 @@
 # =============================================================================
 
 env_name: "workspace_env"
-micromamba_root: "~/micromamba"
+# Must match SFNB_MICROMAMBA_ROOT in the CRE image (not ~/micromamba → /root).
+micromamba_root: "/home/jupyter/micromamba"
 
 # Optional: reduce EAI domain checks when nothing is downloaded at runtime.
 # Leave commented if you install extra CRAN packages or bump tarballs in-session.

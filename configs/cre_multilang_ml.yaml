@@ -1,0 +1,52 @@
+# =============================================================================
+# Custom Runtime Environment (CRE) — ML demos (credit risk, registry, forecast)
+# =============================================================================
+# Baked into sfnb-multilang-r:ml-v1 via configs/sfnb_ml.example.yaml.
+# Attach in Workspace as cre@sfnb_multilang_ml for Posit / E2E ML notebooks.
+#
+# Keeps sfnb_multilang_r (v1) lean for fast interop and Feature Store-only work.
+#
+# Usage (optional context cell on ML CRE):
+#   from sfnb_setup import setup_notebook
+#   setup_notebook(config="/opt/sfnb/config/cre_multilang_ml.yaml",
+#                  packages=["snowflakeR", "RSnowflake"])
+# =============================================================================
+
+env_name: "workspace_env"
+micromamba_root: "/home/jupyter/micromamba"
+
+languages:
+  r:
+    enabled: true
+    r_version: "4.5.2"
+    conda_packages:
+      - r-cli
+      - r-rlang>=1.0.0
+      - r-reticulate>=1.25
+      - r-tidyverse
+      - r-dbplyr
+      - r-httr2>=1.0.0
+      - r-lazyeval
+      - r-dbi>=1.2.0
+      - r-jsonlite
+      - r-nanoarrow
+      - r-dplyr>=1.1.0
+      - r-tidymodels
+      - r-xgboost
+      - r-ranger
+      - r-forecast
+      - r-foreach
+      - r-iterators
+    cran_packages: []
+    addons:
+      adbc: true
+      duckdb: false
+    tarballs:
+      snowflakeR: "https://github.com/Snowflake-Labs/snowflakeR/releases/download/v0.2.0/snowflakeR_0.2.0.tar.gz"
+      RSnowflake: "https://github.com/Snowflake-Labs/RSnowflake/releases/download/v0.2.0/RSnowflake_0.2.0.tar.gz"
+
+  scala:
+    enabled: false
+
+  julia:
+    enabled: false

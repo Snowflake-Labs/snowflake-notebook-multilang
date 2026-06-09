@@ -1,0 +1,45 @@
+# =============================================================================
+# CRE profile — ML demo image (tidymodels + credit risk / registry notebooks)
+# =============================================================================
+# Copy and customize (do not commit account-specific registry paths if policy forbids):
+#   cp configs/sfnb_ml.example.yaml configs/sfnb_ml.yaml
+#   # edit registry_url, image_repo_path
+#   ./docker/create_cre.sh configs/sfnb_ml.yaml
+#
+#   PUSH=1 SNOW_CONNECTION=my_conn ./docker/create_cre.sh configs/sfnb_ml.yaml
+#
+# Register as a SEPARATE CRE from sfnb_multilang_r (v1). Analysts pick:
+#   cre@sfnb_multilang_r   — lean, fast startup (interop, Feature Store)
+#   cre@sfnb_multilang_ml  — full ML stack (credit risk Posit demo)
+# =============================================================================
+
+cre:
+  name: sfnb_multilang_ml
+  image: sfnb-multilang-r
+  tag: ml-v1
+  version_label: ml-v1
+  r_version: "4.5.2"
+  snowbooks_tag: "2.5.0"
+  adbc: true
+  # Runtime YAML copied into the image at /opt/sfnb/config/
+  runtime_config: cre_multilang_ml.yaml
+
+snowflake:
+  registry_url: "<account>.registry.snowflakecomputing.com"
+  image_repo_path: mydb/myschema/my_cre_images
+
+tarballs:
+  snowflakeR: "https://github.com/Snowflake-Labs/snowflakeR/releases/download/v0.2.0/snowflakeR_0.2.0.tar.gz"
+  RSnowflake: "https://github.com/Snowflake-Labs/RSnowflake/releases/download/v0.2.0/RSnowflake_0.2.0.tar.gz"
+
+extras:
+  conda_r:
+    - r-tidymodels
+    - r-xgboost
+    - r-ranger
+    - r-forecast
+    - r-foreach
+    - r-iterators
+  cran: []
+  cran_mirror: "https://cloud.r-project.org"
+  pip: []

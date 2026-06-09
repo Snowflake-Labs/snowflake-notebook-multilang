@@ -21,10 +21,10 @@ ENV SFNB_CUSTOM_RUNTIME=1
 ENV TZ=UTC
 ENV SFNB_ENV_NAME=workspace_env
 ENV SFNB_MICROMAMBA_ROOT=/home/jupyter/micromamba
-ENV SFNB_CONFIG_PATH=/opt/sfnb/config/cre_multilang_r.yaml
 ENV SFNB_HELPERS_PATH=/opt/sfnb/helpers
-ENV SFNB_CRE_VERSION=v1
 ENV SFNB_CRE_ADBC=1
+ARG SFNB_CONFIG_PATH=/opt/sfnb/config/cre_multilang_r.yaml
+ENV SFNB_CONFIG_PATH=${SFNB_CONFIG_PATH}
 
 USER root
 
@@ -41,13 +41,15 @@ COPY docker/install_prebaked_r.sh /tmp/install_prebaked_r.sh
 COPY docker/generated/cre_extra_install.sh /tmp/cre_extra_install.sh
 COPY pyproject.toml README.md /tmp/sfnb-pkg/
 COPY src /tmp/sfnb-pkg/src
-COPY configs/cre_multilang_r.yaml /tmp/cre_multilang_r.yaml
+COPY docker/generated/cre_runtime.yaml /tmp/cre_runtime.yaml
 COPY docker/cre_ipython_startup/00-sfnb-enable-r.py /tmp/00-sfnb-enable-r.py
 ARG SFNB_CRE_IMAGE_TAG=v1
 ARG SFNB_CRE_ADBC=1
 RUN chmod +x /tmp/install_prebaked_r.sh /tmp/cre_extra_install.sh \
-    && SFNB_CRE_IMAGE_TAG="${SFNB_CRE_IMAGE_TAG}" SFNB_CRE_ADBC="${SFNB_CRE_ADBC}" bash /tmp/install_prebaked_r.sh \
-    && rm -rf /tmp/install_prebaked_r.sh /tmp/cre_extra_install.sh /tmp/sfnb-pkg /tmp/cre_multilang_r.yaml /tmp/00-sfnb-enable-r.py
+    && SFNB_CRE_IMAGE_TAG="${SFNB_CRE_IMAGE_TAG}" SFNB_CRE_ADBC="${SFNB_CRE_ADBC}" \
+       SFNB_CONFIG_PATH="${SFNB_CONFIG_PATH}" bash /tmp/install_prebaked_r.sh \
+    && rm -rf /tmp/install_prebaked_r.sh /tmp/cre_extra_install.sh /tmp/sfnb-pkg \
+       /tmp/cre_runtime.yaml /tmp/00-sfnb-enable-r.py
 
 # Default snowbooks entrypoint must remain unchanged for CRE server-side validation.
 # Do not override ENTRYPOINT or CMD.

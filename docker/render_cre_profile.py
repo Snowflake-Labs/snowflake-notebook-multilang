@@ -47,6 +47,8 @@ def render(profile_path: Path, out_dir: Path) -> None:
     r_version = str(cre.get("r_version", "4.5.2"))
     snowbooks_tag = str(cre.get("snowbooks_tag", "2.5.0"))
     adbc = cre.get("adbc", True)
+    runtime_config = str(cre.get("runtime_config", "cre_multilang_r.yaml"))
+    config_path = f"/opt/sfnb/config/{runtime_config}"
 
     registry = str(sf.get("registry_url", "")).strip()
     repo_path = str(sf.get("image_repo_path", "")).strip().lstrip("/").lower()
@@ -99,6 +101,8 @@ def render(profile_path: Path, out_dir: Path) -> None:
         f"SNOWBOOKS_TAG={snowbooks_tag}",
         f"SFNB_R_VERSION={r_version}",
         f"SFNB_CRE_ADBC={'1' if adbc else '0'}",
+        f"SFNB_RUNTIME_CONFIG={runtime_config}",
+        f"SFNB_CONFIG_PATH={config_path}",
     ]
     if registry:
         env_lines.append(f"REGISTRY_URL={registry}")

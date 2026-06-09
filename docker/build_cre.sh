@@ -18,6 +18,18 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+GEN_DIR="${SCRIPT_DIR}/generated"
+
+# Default runtime YAML for bare build_cre.sh (create_cre.sh overwrites this).
+if [[ ! -f "${GEN_DIR}/cre_runtime.yaml" ]]; then
+  mkdir -p "${GEN_DIR}"
+  cp "${REPO_ROOT}/configs/cre_multilang_r.yaml" "${GEN_DIR}/cre_runtime.yaml"
+fi
+if [[ ! -f "${GEN_DIR}/cre_extra_install.sh" ]]; then
+  mkdir -p "${GEN_DIR}"
+  printf '%s\n' '# Auto-generated placeholder — run create_cre.sh for profile extras.' \
+    'echo "  (no extra packages in profile)"' > "${GEN_DIR}/cre_extra_install.sh"
+fi
 
 IMAGE_TAG="${IMAGE_TAG:-sfnb-multilang-r:v1}"
 SNOWBOOKS_TAG="${SNOWBOOKS_TAG:-2.5.0}"
@@ -33,11 +45,13 @@ fi
 echo "==> Building ${IMAGE_TAG} (snowbooks:${SNOWBOOKS_TAG}, ${PLATFORM})"
 CRE_IMAGE_TAG="${CRE_IMAGE_TAG:-v1}"
 SFNB_CRE_ADBC="${SFNB_CRE_ADBC:-1}"
+SFNB_CONFIG_PATH="${SFNB_CONFIG_PATH:-/opt/sfnb/config/cre_multilang_r.yaml}"
 docker build --platform "${PLATFORM}" \
   --build-arg REGISTRY_URL="${REGISTRY_URL}" \
   --build-arg SNOWBOOKS_TAG="${SNOWBOOKS_TAG}" \
   --build-arg SFNB_CRE_IMAGE_TAG="${CRE_IMAGE_TAG}" \
   --build-arg SFNB_CRE_ADBC="${SFNB_CRE_ADBC}" \
+  --build-arg SFNB_CONFIG_PATH="${SFNB_CONFIG_PATH}" \
   -f "${REPO_ROOT}/docker/Dockerfile.multilang-r" \
   -t "${IMAGE_TAG}" \
   "${REPO_ROOT}"

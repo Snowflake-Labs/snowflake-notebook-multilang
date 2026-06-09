@@ -4,8 +4,22 @@ All notable changes to the `sfnb-multilang` toolkit are documented here.
 
 ## [Unreleased]
 
+### Added
+
+- **ML CRE profile (`sfnb_ml.example.yaml`):** second image tag `ml-v1` /
+  `cre@sfnb_multilang_ml` with tidymodels, xgboost, ranger, forecast, and
+  foreach baked in; `configs/cre_multilang_ml.yaml` runtime preset for Posit /
+  credit-risk E2E demos. Keeps lean `sfnb_multilang_r` v1 unchanged.
+- **CRE `runtime_config`:** profile YAML selects which config file is copied
+  into `/opt/sfnb/config/` at image build time.
+
 ### Fixed
 
+- **CRE micromamba path:** `setup_notebook()` on a custom runtime no longer
+  downloads micromamba to `/root/micromamba` when the image bakes R at
+  `/home/jupyter/micromamba`. Honors `SFNB_MICROMAMBA_ROOT`, sets
+  `MAMBA_ROOT_PREFIX` on micromamba subprocesses, and documents the path in
+  `cre_multilang_r.yaml`.
 - **`%%R` `-i` / `-o` comma lists:** `-o p, mtcars` (space after comma) no longer
   leaves an orphan token that rpy2 injects into the R cell (`mtcarslibrary(...)`).
   `SafeRMagics` normalizes IO lists to `-o p,mtcars` before parsing.

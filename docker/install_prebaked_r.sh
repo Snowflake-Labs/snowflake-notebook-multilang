@@ -196,10 +196,14 @@ fi
 # Config + IPython startup: %%R registers when the kernel starts (empty git repo OK).
 SFNB_ROOT="/opt/sfnb"
 mkdir -p "${SFNB_ROOT}/config"
-if [[ -f /tmp/cre_multilang_r.yaml ]]; then
-  cp /tmp/cre_multilang_r.yaml "${SFNB_ROOT}/config/cre_multilang_r.yaml"
+CONFIG_PATH="${SFNB_CONFIG_PATH:-/opt/sfnb/config/cre_multilang_r.yaml}"
+CONFIG_BASENAME="${CONFIG_PATH##*/}"
+if [[ -f /tmp/cre_runtime.yaml ]]; then
+  cp /tmp/cre_runtime.yaml "${SFNB_ROOT}/config/${CONFIG_BASENAME}"
+elif [[ -f /tmp/cre_multilang_r.yaml ]]; then
+  cp /tmp/cre_multilang_r.yaml "${SFNB_ROOT}/config/${CONFIG_BASENAME}"
 elif [[ -f /tmp/sfnb-cre-assets/cre_multilang_r.yaml ]]; then
-  cp /tmp/sfnb-cre-assets/cre_multilang_r.yaml "${SFNB_ROOT}/config/cre_multilang_r.yaml"
+  cp /tmp/sfnb-cre-assets/cre_multilang_r.yaml "${SFNB_ROOT}/config/${CONFIG_BASENAME}"
 fi
 
 STARTUP_SRC=""

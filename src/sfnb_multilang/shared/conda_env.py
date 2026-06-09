@@ -14,6 +14,11 @@ logger = logging.getLogger("sfnb_multilang.shared.conda_env")
 
 def _micromamba_bin() -> str:
     """Locate the micromamba binary on PATH or in ~/micromamba/bin."""
+    cre_root = os.environ.get("SFNB_MICROMAMBA_ROOT", "").strip()
+    if cre_root:
+        cre_bin = os.path.join(os.path.expanduser(cre_root), "bin", "micromamba")
+        if os.path.isfile(cre_bin) and os.access(cre_bin, os.X_OK):
+            return cre_bin
     # Check PATH first
     for p in os.environ.get("PATH", "").split(os.pathsep):
         candidate = os.path.join(p, "micromamba")
@@ -26,6 +31,22 @@ def _micromamba_bin() -> str:
     raise FileNotFoundError("micromamba not found. Run ensure_micromamba() first.")
 
 
+def _mamba_root_prefix() -> str:
+    """Return MAMBA_ROOT_PREFIX for the resolved micromamba binary."""
+    cre_root = os.environ.get("SFNB_MICROMAMBA_ROOT", "").strip()
+    if cre_root:
+        return os.path.expanduser(cre_root)
+    mm_bin = _micromamba_bin()
+    return os.path.dirname(os.path.dirname(mm_bin))
+
+
+def _mamba_env() -> dict[str, str]:
+    """Subprocess env with MAMBA_ROOT_PREFIX aligned to the micromamba binary."""
+    merged = dict(os.environ)
+    merged["MAMBA_ROOT_PREFIX"] = _mamba_root_prefix()
+    return merged
+
+
 def env_exists(env_name: str) -> bool:
     """Check whether a named micromamba environment exists."""
     try:
@@ -33,6 +54,7 @@ def env_exists(env_name: str) -> bool:
             [_micromamba_bin(), "env", "list", "--json"],
             description="List environments",
             check=False,
+            env=_mamba_env(),
         )
         if result.returncode != 0:
             return False
@@ -48,6 +70,7 @@ def get_env_prefix(env_name: str) -> str:
     result = run_cmd(
         [_micromamba_bin(), "env", "list", "--json"],
         description="Get env prefix",
+        env=_mamba_env(),
     )
     data = json.loads(result.stdout)
     for env_path in data.get("envs", []):
@@ -61,6 +84,7 @@ def get_installed_packages(env_name: str) -> dict[str, str]:
     result = run_cmd(
         [_micromamba_bin(), "list", "-n", env_name, "--json"],
         description="List packages",
+        env=_mamba_env(),
     )
     packages = json.loads(result.stdout)
     return {p["name"]: p["version"] for p in packages}
@@ -118,6 +142,7 @@ def create_or_update_env(
                 [mm, "install", "-y", "-n", env_name, "-c", channel]
                 + ssl_flags + missing,
                 description="Install missing packages",
+                env=_mamba_env(),
             )
     elif exists and force:
         logger.info("Force reinstalling packages in '%s'...", env_name)
@@ -125,6 +150,7 @@ def create_or_update_env(
             [mm, "install", "-y", "-n", env_name, "-c", channel]
             + ssl_flags + packages,
             description="Update environment",
+            env=_mamba_env(),
         )
     else:
         logger.info("Creating environment '%s'...", env_name)
@@ -132,6 +158,7 @@ def create_or_update_env(
             [mm, "create", "-y", "-n", env_name, "-c", channel]
             + ssl_flags + packages,
             description="Create environment",
+            env=_mamba_env(),
         )
 
     prefix = get_env_prefix(env_name)

@@ -69,8 +69,16 @@ python3 "${RENDER}" "${PROFILE}" -o "${GEN_DIR}"
 # shellcheck source=/dev/null
 source "${GEN_DIR}/cre_profile.env"
 
+RUNTIME_CFG="${SFNB_RUNTIME_CONFIG:-cre_multilang_r.yaml}"
+if [[ ! -f "${REPO_ROOT}/configs/${RUNTIME_CFG}" ]]; then
+  echo "ERROR: runtime_config not found: configs/${RUNTIME_CFG}"
+  exit 1
+fi
+cp "${REPO_ROOT}/configs/${RUNTIME_CFG}" "${GEN_DIR}/cre_runtime.yaml"
+echo "==> Runtime config for image: configs/${RUNTIME_CFG} → docker/generated/cre_runtime.yaml"
+
 export REGISTRY_URL IMAGE_REPO_PATH CRE_NAME IMAGE_TAG CRE_IMAGE_TAG SNOWBOOKS_TAG
-export SFNB_CRE_ADBC SFNB_R_VERSION
+export SFNB_CRE_ADBC SFNB_R_VERSION SFNB_RUNTIME_CONFIG SFNB_CONFIG_PATH
 [[ -n "${SNOWFLAKER_TARBALL:-}" ]] && export SNOWFLAKER_TARBALL
 [[ -n "${RSNOWFLAKE_TARBALL:-}" ]] && export RSNOWFLAKE_TARBALL
 

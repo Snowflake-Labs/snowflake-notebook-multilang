@@ -31,10 +31,11 @@ Path matrix (CRE / bootstrap / GPU / local IDE): [cre_path_matrix.md](cre_path_m
 
 Publish **tags aligned to snowbooks / Container Runtime**, not ad-hoc `:latest` only.
 
-| Tag | snowbooks / runtime | `%%R` auto | sfnb-multilang | ADBC | Notes |
-|-----|---------------------|------------|----------------|------|-------|
-| **v1** | 2.5.x CPU | **Yes** | **Yes** | **Yes** | **First supported reference (CPU)** |
-| v1-gpu | 2.5.x **GPU** | Yes | Yes | Optional | Separate image + `BASE_IMAGE_TYPE = GPU` |
+| Tag | CRE name | snowbooks / runtime | `%%R` auto | ADBC | Notes |
+|-----|----------|---------------------|------------|------|-------|
+| **v1** | `sfnb_multilang_r` | 2.5.x CPU | **Yes** | **Yes** | **Lean reference (CPU)** — fast startup |
+| **ml-v1** | `sfnb_multilang_ml` | 2.5.x CPU | **Yes** | **Yes** | **ML demos** — tidymodels, xgboost, forecast, credit risk |
+| v1-gpu | `sfnb_multilang_r_gpu` | 2.5.x **GPU** | Yes | Optional | Separate image + `BASE_IMAGE_TYPE = GPU` |
 
 Earlier internal image experiments were not published as a separate version. If your registry still has `:v2` from development, it is the same recipe as **v1** — rebuild and tag `:v1` for new rollouts.
 
@@ -46,7 +47,7 @@ there is no shared public pull URL (CRE images live in **your account's** image 
 
 | Component | Default location | Notes |
 |-----------|------------------|-------|
-| micromamba | `~/micromamba` | Same path as default YAML config |
+| micromamba | `/home/jupyter/micromamba` | CRE `SFNB_MICROMAMBA_ROOT` (not `~/micromamba` → `/root`) |
 | Conda env `workspace_env` | micromamba env prefix | R 4.5.2 + tidyverse/dbplyr/DBI stack |
 | snowflakeR + RSnowflake | R library in env | GitHub release tarballs at **image build** time |
 | **ADBC (v1)** | R library + conda | `adbcdrivermanager`, `adbcsnowflake`, … |
@@ -108,6 +109,26 @@ PUSH=1 SNOW_CONNECTION=your_connection ./docker/create_cre.sh configs/my_org.yam
 Outputs: `docker/generated/cre_extra_install.sh`, `cre_profile.env`, `cre_register.sql`.
 
 **Do not commit** `configs/cre_profile.yaml` with real registry hosts if your policy forbids it; use the example template only in git.
+
+### ML demo image (`ml-v1`) — credit risk / Model Registry / Posit briefings
+
+Keep **`sfnb_multilang_r` (v1)** for fast interop and Feature Store-only notebooks. Build a **second** CRE for end-to-end ML:
+
+```bash
+cp configs/sfnb_ml.example.yaml configs/sfnb_ml.yaml
+# edit registry_url, image_repo_path
+./docker/create_cre.sh configs/sfnb_ml.yaml
+PUSH=1 SNOW_CONNECTION=your_connection ./docker/create_cre.sh configs/sfnb_ml.yaml
+# Run printed cre_register.sql → cre@sfnb_multilang_ml
+```
+
+Bakes **tidymodels**, **xgboost**, **ranger**, **forecast**, **foreach/iterators**, snowflakeR **0.2.0**, and `cre_multilang_ml.yaml` at `/opt/sfnb/config/`. Attach credit-risk notebooks to `cre@sfnb_multilang_ml`; optional setup cell:
+
+```python
+from sfnb_setup import setup_notebook
+setup_notebook(config="/opt/sfnb/config/cre_multilang_ml.yaml",
+               packages=["snowflakeR", "RSnowflake"])
+```
 
 ## Quick workflow (local Docker)
 

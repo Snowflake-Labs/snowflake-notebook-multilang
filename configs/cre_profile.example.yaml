@@ -21,6 +21,8 @@ cre:
   snowbooks_tag: "2.5.0"
   # Bake ADBC (adbcsnowflake) — adds ~2–3 min to image build
   adbc: true
+  # YAML copied to /opt/sfnb/config/ in the image (default: lean v1 preset)
+  runtime_config: cre_multilang_r.yaml
 
 snowflake:
   # Account image registry host (from SHOW IMAGE REPOSITORIES / Snowsight)
@@ -51,3 +53,5 @@ extras:
   # Examples:
   #   - scikit-learn>=1.3
   #   - prophet
+
+# ML demo image (tidymodels, credit risk): see configs/sfnb_ml.example.yaml

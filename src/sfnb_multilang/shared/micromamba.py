@@ -268,6 +268,13 @@ def ensure_micromamba(
     Returns:
         Absolute path to the micromamba binary.
     """
+    cre_root = os.environ.get("SFNB_MICROMAMBA_ROOT", "").strip()
+    if cre_root and not force:
+        cre_binary = os.path.join(os.path.expanduser(cre_root), "bin", "micromamba")
+        if os.path.isfile(cre_binary) and os.access(cre_binary, os.X_OK):
+            logger.info("micromamba already installed (CRE, skipping)")
+            return cre_binary
+
     root = os.path.expanduser(root)
     binary = os.path.join(root, "bin", "micromamba")
 
