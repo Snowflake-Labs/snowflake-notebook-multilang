@@ -19,7 +19,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-IMAGE_TAG="${IMAGE_TAG:-sfnb-multilang-r:v2}"
+IMAGE_TAG="${IMAGE_TAG:-sfnb-multilang-r:v1}"
 SNOWBOOKS_TAG="${SNOWBOOKS_TAG:-2.5.0}"
 PLATFORM="${PLATFORM:-linux/amd64}"
 
@@ -31,7 +31,7 @@ if [[ -z "${REGISTRY_URL:-}" ]]; then
 fi
 
 echo "==> Building ${IMAGE_TAG} (snowbooks:${SNOWBOOKS_TAG}, ${PLATFORM})"
-CRE_IMAGE_TAG="${CRE_IMAGE_TAG:-v2}"
+CRE_IMAGE_TAG="${CRE_IMAGE_TAG:-v1}"
 SFNB_CRE_ADBC="${SFNB_CRE_ADBC:-1}"
 docker build --platform "${PLATFORM}" \
   --build-arg REGISTRY_URL="${REGISTRY_URL}" \

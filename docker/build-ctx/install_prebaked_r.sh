@@ -10,7 +10,7 @@ CONDA_CHANNEL="${SFNB_CONDA_CHANNEL:-conda-forge}"
 # ADBC: slow at notebook runtime (~2 min); bake by default (set SFNB_CRE_ADBC=0 to skip).
 SFNB_CRE_ADBC="${SFNB_CRE_ADBC:-1}"
 CRAN_MIRROR="${SFNB_CRAN_MIRROR:-https://cloud.r-project.org}"
-CRE_IMAGE_TAG="${SFNB_CRE_IMAGE_TAG:-v2}"
+CRE_IMAGE_TAG="${SFNB_CRE_IMAGE_TAG:-v1}"
 
 # Match configs/cre_multilang_r.yaml (snowflakeR + RSnowflake preset).
 CONDA_PACKAGES=(

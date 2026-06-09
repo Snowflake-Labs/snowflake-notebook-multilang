@@ -532,6 +532,33 @@ def _resolve_var(name, local_ns, shell):
     return None
 
 
+def _normalize_r_magic_io_flags(line: str) -> str:
+    """Collapse spaces around commas in ``-i`` / ``-o`` variable lists.
+
+    IPython passes only the first line of a ``%%R`` cell as *line*; the R body
+    is separate (*cell*).  Whitespace tokenization of ``-o p, mtcars`` yields
+    ``['-o', 'p,', 'mtcars']`` — the orphan ``mtcars`` is treated as input to
+    inject, producing errors like ``could not find function "mtcarslibrary"``.
+
+    Rewrite to ``-o p,mtcars`` before ``line.split()`` and before rpy2 parsing.
+    """
+    import re
+
+    def _collapse(match: re.Match) -> str:
+        flag = match.group(1)
+        raw = match.group(2)
+        names = [name.strip() for name in raw.split(',') if name.strip()]
+        if not names:
+            return match.group(0)
+        return f"{flag} {','.join(names)}"
+
+    pattern = (
+        r'(-i|-o|--input|--output)\s+'
+        r'((?:[^-\s]\S*\s*,\s*)+[^-\s]\S*)'
+    )
+    return re.sub(pattern, _collapse, line)
+
+
 def _build_safe_r_magics_class():
     """Build and return an RMagics subclass with improved behaviour.
 
@@ -566,6 +593,9 @@ def _build_safe_r_magics_class():
        is checked and aligned between the Snowpark and R sessions.
     5. **``--time``** — prints wall-clock execution time.
     6. **``--silent``** — suppresses all R text output.
+    7. **``-i`` / ``-o`` list normalization** — ``-o p, mtcars`` (spaces after
+       commas) is rewritten to ``-o p,mtcars`` so rpy2 does not treat trailing
+       names as stray ``-i`` injections.
     """
     import time
     import IPython.core.magic
@@ -611,6 +641,7 @@ def _build_safe_r_magics_class():
             o_vars = []
 
             if cell is not None:
+                line = _normalize_r_magic_io_flags(line)
                 parts = line.split()
                 if "--time" in parts:
                     show_time = True

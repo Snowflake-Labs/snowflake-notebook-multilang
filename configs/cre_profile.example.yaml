@@ -14,9 +14,9 @@ cre:
   name: sfnb_multilang_r
   # Docker image name:tag (also used for CRE IMAGE_PATH tail)
   image: sfnb-multilang-r
-  tag: v2
+  tag: v1
   # Label stamped in /opt/sfnb/CRE_VERSION inside the image
-  version_label: v2
+  version_label: v1
   r_version: "4.5.2"
   snowbooks_tag: "2.5.0"
   # Bake ADBC (adbcsnowflake) — adds ~2–3 min to image build
@@ -33,7 +33,7 @@ tarballs:
   snowflakeR: "https://github.com/Snowflake-Labs/snowflakeR/releases/download/v0.1.0/snowflakeR_0.1.0.tar.gz"
   RSnowflake: "https://github.com/Snowflake-Labs/RSnowflake/releases/download/v0.2.0/RSnowflake_0.2.0.tar.gz"
 
-# Extra packages baked into the image (beyond the v2 defaults)
+# Extra packages baked into the image (beyond the v1 defaults)
 extras:
   # conda-forge specs installed into workspace_env after base create
   conda_r: []

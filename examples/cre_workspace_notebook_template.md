@@ -1,6 +1,6 @@
-# Workspace notebook template (CRE v2, no bootstrap cell)
+# Workspace notebook template (reference CRE v1, no bootstrap cell)
 
-Use when the notebook is attached to **`cre@sfnb_multilang_r`** (or your org CRE name) built from sfnb-multilang **v2+**.
+Use when the notebook is attached to **`cre@sfnb_multilang_r`** (or your org CRE name) built from sfnb-multilang **v1** (`sfnb-multilang-r:v1`).
 
 ## Snowsight setup
 
@@ -25,7 +25,7 @@ R and `%%R` are pre-baked in the container runtime. Optional Python cell sets se
 from sfnb_setup import setup_notebook
 
 setup_notebook(
-    config="/opt/sfnb/config/cre_multilang_r.yaml",  # baked in v2 image
+    config="/opt/sfnb/config/cre_multilang_r.yaml",  # baked in reference v1 image
     packages=["snowflakeR", "RSnowflake"],
 )
 ```
@@ -75,7 +75,7 @@ print("CRE_VERSION:", open("/opt/sfnb/CRE_VERSION").read().strip()
 
 - Confirm CRE is selected in advanced settings.
 - Restart kernel / session.
-- Org may be on CRE v1 — add one bootstrap cell with `enable_r_cells()` or upgrade image to v2.
+- Image may be an old `:v2` dev tag — rebuild with current `build_cre.sh` (defaults to **v1**) or add one bootstrap cell with `enable_r_cells()`.
 
 ## Bootstrap fallback
 

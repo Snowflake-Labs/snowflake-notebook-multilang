@@ -18,9 +18,9 @@ See [CRE vs bootstrap](#cre-vs-bootstrap) and [Organisation operating model](org
 |---|--------------------------------------|--------------------------|
 | **Who sets it up** | Platform / IT | Analyst or pilot team |
 | **Best for** | Production after org go-live | PoC before CRE exists, package experiments |
-| **First `%%R`** | Seconds after container is up (v2 auto-startup) | Minutes (micromamba + tarballs + EAI) |
+| **First `%%R`** | Seconds after container is up (reference v1 auto-startup) | Minutes (micromamba + tarballs + EAI) |
 | **Governance** | Image scanned in CI; pinned digest | Runtime downloads (EAI required) |
-| **Empty git repo** | v2: no setup cell | Bootstrap cell required |
+| **Empty git repo** | Reference v1: no setup cell | Bootstrap cell required |
 | **Maintenance** | Platform team owns image + profile YAML | Each notebook / YAML |
 
 **Caching:** Image **layers** cache on registry/nodes after first pull. **Kernel restart** in the same session is cheap. **Idle container recycle** starts fresh compute: CRE keeps R in the image; bootstrap reinstalls R.
@@ -33,22 +33,23 @@ Publish **tags aligned to snowbooks / Container Runtime**, not ad-hoc `:latest` 
 
 | Tag | snowbooks / runtime | `%%R` auto | sfnb-multilang | ADBC | Notes |
 |-----|---------------------|------------|----------------|------|-------|
-| v1 | 2.5.x CPU | No | No | No | Legacy; bootstrap cell for magic |
-| **v2** | 2.5.x CPU | **Yes** | **Yes** | **Yes** | **Recommended CPU default** |
-| v2-gpu | 2.5.x **GPU** | Yes | Yes | Optional | Separate image + `BASE_IMAGE_TYPE = GPU` |
+| **v1** | 2.5.x CPU | **Yes** | **Yes** | **Yes** | **First supported reference (CPU)** |
+| v1-gpu | 2.5.x **GPU** | Yes | Yes | Optional | Separate image + `BASE_IMAGE_TYPE = GPU` |
+
+Earlier internal image experiments were not published as a separate version. If your registry still has `:v2` from development, it is the same recipe as **v1** — rebuild and tag `:v1` for new rollouts.
 
 Build CPU and GPU images as **separate CRE objects** (`sfnb_multilang_r`, `sfnb_multilang_r_gpu`).
 Customers rebuild from this repo with `docker/create_cre.sh` and their own registry path —
 there is no shared public pull URL (CRE images live in **your account's** image repository).
 
-## What gets pre-baked (v2)
+## What gets pre-baked (reference v1)
 
 | Component | Default location | Notes |
 |-----------|------------------|-------|
 | micromamba | `~/micromamba` | Same path as default YAML config |
 | Conda env `workspace_env` | micromamba env prefix | R 4.5.2 + tidyverse/dbplyr/DBI stack |
 | snowflakeR + RSnowflake | R library in env | GitHub release tarballs at **image build** time |
-| **ADBC (v2+)** | R library + conda | `adbcdrivermanager`, `adbcsnowflake`, … |
+| **ADBC (v1)** | R library + conda | `adbcdrivermanager`, `adbcsnowflake`, … |
 | rpy2, tabulate | Notebook Python | pip at image build |
 | **sfnb-multilang** | Notebook Python | `setup_notebook`, `enable_r_cells`, … |
 | **`%%R` auto-registration** | `~/.ipython/.../startup/` | Kernel startup hook |
@@ -141,7 +142,7 @@ PUSH=1 ./docker/build_cre.sh
 
 ```sql
 CREATE OR REPLACE CUSTOM RUNTIME ENVIRONMENT sfnb_multilang_r
-    IMAGE_PATH = '/mydb/myschema/my_repo/sfnb-multilang-r:v2'
+    IMAGE_PATH = '/mydb/myschema/my_repo/sfnb-multilang-r:v1'
     BASE_IMAGE_TYPE = CPU;
 
 GRANT USAGE ON CUSTOM RUNTIME ENVIRONMENT sfnb_multilang_r TO ROLE <notebook_role>;
@@ -163,7 +164,7 @@ EXECUTE NOTEBOOK PROJECT MYDB.MYSCHEMA.MY_PROJECT
     QUERY_WAREHOUSE = 'MY_WH';
 ```
 
-Notebook template (no bootstrap cell on v2): [examples/cre_workspace_notebook_template.md](../examples/cre_workspace_notebook_template.md).
+Notebook template (no bootstrap cell on reference v1): [examples/cre_workspace_notebook_template.md](../examples/cre_workspace_notebook_template.md).
 
 ### 6. Verify
 
@@ -186,8 +187,8 @@ setup_notebook(config="/opt/sfnb/config/cre_multilang_r.yaml", packages=["snowfl
 |----------|-------------------|
 | Default runtime (cold bootstrap) | ~60s typical per restart; longer with extra packages |
 | Default runtime (warm micromamba cache) | ~2s + bootstrap logic |
-| **CRE v2** | **0 setup cells**; `%%R` on kernel start |
-| **CRE v1** | R baked; still need bootstrap cell for `%%R` magic |
+| **Reference CRE v1** | **0 setup cells**; `%%R` on kernel start |
+| Cold bootstrap only | Bootstrap cell required for `%%R` |
 
 ## Customizing the image
 
@@ -203,8 +204,8 @@ GPU R packages (`torch`, etc.): use a **GPU snowbooks** base and [Hitchhiker's G
 | CRE `CREATE` fails | Not derived from snowbooks — run `snow custom-image validate` |
 | `exec format error` | Build without `--platform linux/amd64` |
 | Still slow | Notebook not using CRE — check advanced settings / `RUNTIME` |
-| `%%R` unknown on v2 | Wrong image tag or CRE not recreated after push |
-| renv hang | `.Rprofile` on `/filesystem` git mount — use CRE v2 or `enable_r_cells()` |
+| `%%R` unknown on CRE | Wrong image tag or CRE not recreated after push |
+| renv hang | `.Rprofile` on `/filesystem` git mount — use reference CRE v1 or `enable_r_cells()` |
 | Digest rejected at run | Image changed after register — `CREATE OR REPLACE` CRE |
 
 Container internals: see the Hitchhiker's Guide **Appendix G** (Workspace container internals).

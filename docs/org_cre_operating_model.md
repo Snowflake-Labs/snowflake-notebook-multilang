@@ -27,7 +27,7 @@ This matches what many enterprises do in practice: a managed setup phase (image 
 
 ## Versioning policy
 
-- Tag images with **sfnb version + snowbooks runtime** (e.g. `v2`, `v2.5.0-20260501`).
+- Tag images with **sfnb version + snowbooks runtime** (e.g. `v1`, `v1.5.0-20260501`).
 - Pin tarballs in profile YAML (`tarballs.snowflakeR`, `tarballs.RSnowflake`).
 - Do not rely on `:latest` in production CRE registrations.
 - Keep **CPU** and **GPU** images as separate CRE names.
@@ -60,7 +60,7 @@ Store **digest** from `DESCRIBE CUSTOM RUNTIME ENVIRONMENT` in change tickets.
 | **~60 seconds** (or more) on each compute restart to run `setup_notebook()` | R, `%%R`, and approved packages are already in the image |
 | Different package versions per notebook | One **versioned image** and digest for the whole team |
 | Runtime downloads from CRAN/conda (EAI, audit) | Packages fixed at **build time**; security reviews the image once |
-| Analysts wait on install cells before modelling | v2 images: open notebook and use **`%%R`** directly (empty git repo is fine) |
+| Analysts wait on install cells before modelling | Reference **v1** image: open notebook and use **`%%R`** directly (empty git repo is fine) |
 
 **Pilot vs production:** During evaluation, analysts can use **bootstrap** (one Python cell, no Docker). After your platform team registers `cre@<org_name>`, production notebooks should attach that CRE in Workspace advanced settings.
 

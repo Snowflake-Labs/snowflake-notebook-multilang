@@ -4,25 +4,11 @@ All notable changes to the `sfnb-multilang` toolkit are documented here.
 
 ## [Unreleased]
 
-### Added
+### Fixed
 
-- **CRE profile builder:** `configs/cre_profile.example.yaml`, `docker/create_cre.sh`,
-  and `docker/render_cre_profile.py` — declare extra conda/CRAN/pip packages in YAML,
-  one command to render, build, validate, push, and print register SQL.
-- **Docs:** CRE as organisation default — `docs/org_cre_operating_model.md`,
-  `docs/cre_path_matrix.md`, `examples/cre_workspace_notebook_template.md`;
-  removed account-specific examples from `docs/custom_runtime_images.md`.
-- **`build_cre_snowflake.sh`:** requires env vars only (no baked-in connection/account names).
-- **Custom Runtime Images (CRE):** `docker/Dockerfile.multilang-r` and
-  `docker/build_cre.sh` to pre-bake micromamba, R 4.5.2, snowflakeR, and
-  RSnowflake on the official `snowbooks` base image for Workspace Notebooks.
-- **`configs/cre_multilang_r.yaml`:** preset config for notebooks using
-  `cre@sfnb_multilang_r` (or your CRE name).
-- **`docs/custom_runtime_images.md`:** end-to-end build, push, register, and
-  attach workflow.
-- **`setup_notebook()`:** detects pre-baked CRE images (`SFNB_CUSTOM_RUNTIME`
-  or existing micromamba + R) and skips tarball reinstall when packages are
-  already present; optional `custom_runtime.skip_eai_when_prebaked`.
+- **`%%R` `-i` / `-o` comma lists:** `-o p, mtcars` (space after comma) no longer
+  leaves an orphan token that rpy2 injects into the R cell (`mtcarslibrary(...)`).
+  `SafeRMagics` normalizes IO lists to `-o p,mtcars` before parsing.
 
 ## [0.1.3] - 2026-04-28
 

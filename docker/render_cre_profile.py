@@ -42,7 +42,7 @@ def render(profile_path: Path, out_dir: Path) -> None:
 
     name = str(cre.get("name", "sfnb_multilang_r"))
     image = str(cre.get("image", "sfnb-multilang-r"))
-    tag = str(cre.get("tag", "v2"))
+    tag = str(cre.get("tag", "v1"))
     version_label = str(cre.get("version_label", tag))
     r_version = str(cre.get("r_version", "4.5.2"))
     snowbooks_tag = str(cre.get("snowbooks_tag", "2.5.0"))

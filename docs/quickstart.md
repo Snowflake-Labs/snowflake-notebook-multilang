@@ -6,17 +6,7 @@
 2. An External Access Integration (EAI) configured for outbound network
    access. `setup_notebook()` can create/manage this automatically.
 
-## Organisation path: CRE onboarding (platform / IT)
-
-If you are **rolling out R to a team**, plan an IT- or platform-managed **CRE
-onboarding**: build and register a shared image (`cre@<org_name>`), grant notebook
-roles, then analysts attach it in Workspace — v2 images need **no bootstrap cell**.
-See [org_cre_operating_model.md](org_cre_operating_model.md),
-[custom_runtime_images.md](custom_runtime_images.md), and `docker/create_cre.sh`.
-
-**Individual analysts** use bootstrap (below) during a pilot or until that org CRE exists.
-
-## Bootstrap: setup_notebook() (single cell)
+## Recommended: setup_notebook() (single cell)
 
 Upload `sfnb_setup.py` alongside your notebook and create a `_config.yaml`:
 
@@ -71,12 +61,11 @@ install(languages=["r", "scala"])
 install(config="config.yaml")
 ```
 
-**Typical install times (each compute restart, fresh container):**
+**Typical install times (fresh container):**
 
 | Configuration | Time |
 |---|---|
-| Standard `setup_notebook()` (snowflakeR + RSnowflake tarballs) | ~60s |
-| R base + tidyverse only (no snowflakeR tarballs yet) | ~45s |
+| R base + tidyverse | ~45s |
 | R + ADBC Snowflake driver | ~2 min (Go compilation) |
 | R + ADBC + DuckDB Snowflake extension | ~2.5 min |
 | Scala/Java + Snowpark | ~30s |

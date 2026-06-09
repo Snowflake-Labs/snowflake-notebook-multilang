@@ -65,95 +65,6 @@ PAT_TOKEN_NAME = "r_adbc_pat"
 # Environment Setup
 # =============================================================================
 
-def _clear_workspace_renv_env() -> None:
-    """Stop Git-connected Workspace repos from hijacking R with renv on /filesystem.
-
-    Snowflake mounts the project under ``/filesystem/<hash>/``. If the repo
-    contains ``renv/`` and a root ``.Rprofile`` (``source("renv/activate.R")``),
-    R will try to bootstrap renv on the mount (``Operation not supported``) and
-    hang for many minutes. Use the pre-baked conda library and skip project
-    startup files instead.
-    """
-    for key in list(os.environ.keys()):
-        if key.startswith("RENV_") or key in (
-            "R_LIBS_USER",
-            "R_LIBS",
-            "R_PROFILE_USER",
-            "R_PROFILE",
-            "R_ENVIRON_USER",
-            "R_ENVIRON",
-        ):
-            os.environ.pop(key, None)
-    os.environ["RENV_CONFIG_AUTOLOADER_ENABLED"] = "false"
-    os.environ["RENV_ACTIVATE_PROJECT"] = "false"
-    os.environ["RENV_CONFIG_USER_PROFILE"] = "false"
-    os.environ.pop("RENV_PROJECT", None)
-    # Skip repo .Rprofile / .Renviron (parent-dir search still finds monorepo root).
-    os.environ["R_PROFILE_USER"] = "/dev/null"
-    os.environ["R_ENVIRON_USER"] = "/dev/null"
-    os.environ["R_ARGS"] = "--vanilla"
-
-
-def _r_subprocess_env() -> dict[str, str]:
-    """Environment dict for R subprocesses (inherits current process)."""
-    return os.environ.copy()
-
-
-def _maybe_chdir_away_from_filesystem() -> str | None:
-    """Return previous cwd if we moved off a /filesystem git mount."""
-    prev = os.getcwd()
-    if prev.startswith("/filesystem"):
-        try:
-            os.chdir("/tmp")
-        except OSError:
-            return None
-        return prev
-    return None
-
-
-def _restore_cwd(prev: str | None) -> None:
-    if prev:
-        try:
-            os.chdir(prev)
-        except OSError:
-            pass
-
-
-def _is_prebaked_runtime() -> bool:
-    if os.environ.get("SFNB_CUSTOM_RUNTIME", "").strip().lower() in (
-        "1", "true", "yes",
-    ):
-        return True
-    marker = os.path.expanduser("~/.workspace_env_prefix")
-    if os.path.isfile(marker):
-        prefix = open(marker).read().strip()
-        return bool(prefix) and os.path.isfile(os.path.join(prefix, "bin", "R"))
-    return False
-
-
-def _apply_conda_r_env(prefix: str) -> None:
-    """Point the notebook kernel at micromamba/conda R (CRE or bootstrap)."""
-    _clear_workspace_renv_env()
-    os.environ["PATH"] = f"{prefix}/bin:" + os.environ.get("PATH", "")
-    os.environ["R_HOME"] = f"{prefix}/lib/R"
-    lib = os.path.join(prefix, "lib", "R", "library")
-    os.environ["R_LIBS"] = lib
-    os.environ["R_LIBS_USER"] = lib
-    ld_parts = [os.path.join(prefix, "lib"), os.path.join(prefix, "lib", "R", "lib")]
-    existing_ld = os.environ.get("LD_LIBRARY_PATH", "")
-    if existing_ld:
-        ld_parts.append(existing_ld)
-    os.environ["LD_LIBRARY_PATH"] = ":".join(ld_parts)
-
-
-def _r_magic_registered() -> bool:
-    try:
-        ip = get_ipython()  # noqa: F821
-        return "R" in ip.magics_manager.magics.get("cell", {})
-    except Exception:
-        return False
-
-
 def setup_r_environment(install_rpy2: bool = True, register_magic: bool = True) -> Dict[str, Any]:
     """
     Configure the Python environment to use R from micromamba.
@@ -185,32 +96,18 @@ def setup_r_environment(install_rpy2: bool = True, register_magic: bool = True) 
         'errors': []
     }
     
-    prefix = _resolve_r_env_prefix()
-    prebaked = _is_prebaked_runtime()
-
     # Check if R environment exists
-    if not os.path.isdir(prefix):
+    if not os.path.isdir(R_ENV_PREFIX):
         result['errors'].append(
-            f"R environment not found at {prefix}. "
-            "Run setup_notebook() or use a CRE image with pre-baked R."
+            f"R environment not found at {R_ENV_PREFIX}. "
+            "Run 'bash setup_r_environment.sh' first."
         )
         return result
-
-    # Configure environment variables (clears repo renv on /filesystem first)
-    _apply_conda_r_env(prefix)
+    
+    # Configure environment variables
+    os.environ["PATH"] = f"{R_ENV_PREFIX}/bin:" + os.environ.get("PATH", "")
+    os.environ["R_HOME"] = f"{R_ENV_PREFIX}/lib/R"
     result['r_home'] = os.environ["R_HOME"]
-    prev_cwd = _maybe_chdir_away_from_filesystem()
-
-    if register_magic and _r_magic_registered():
-        try:
-            import importlib
-            result['rpy2_installed'] = importlib.util.find_spec("rpy2") is not None
-        except OSError:
-            result['rpy2_installed'] = False
-        result['magic_registered'] = True
-        result['success'] = True
-        _restore_cwd(prev_cwd)
-        return result
 
     # Set TZ before R initialises (SPCS/Workspace containers have a broken
     # /var/db/timezone/localtime symlink that causes R timezone warnings).
@@ -241,17 +138,15 @@ def setup_r_environment(install_rpy2: bool = True, register_magic: bool = True) 
     r_path = shutil.which('R')
     if not r_path:
         result['errors'].append("R binary not found in PATH after configuration")
-        _restore_cwd(prev_cwd)
         return result
     
     # Get R version
     try:
         r_version = subprocess.run(
-            ['R', '--vanilla', '--version'],
+            ['R', '--version'],
             capture_output=True,
             text=True,
-            timeout=10,
-            env=_r_subprocess_env(),
+            timeout=10
         )
         if r_version.returncode == 0:
             result['r_version'] = r_version.stdout.split('\n')[0]
@@ -271,82 +166,53 @@ def setup_r_environment(install_rpy2: bool = True, register_magic: bool = True) 
             except OSError:
                 _tab_ok = False
 
-            pip_flags = ["-m", "pip", "install", "-q"]
-            # snowbooks / uv-managed notebook kernels (CRE base image)
-            pip_flags.append("--break-system-packages")
-            pip_timeout = 90 if prebaked else 120
-
             if not _rpy2_ok:
-                if prebaked:
-                    print(
-                        "Installing rpy2 (one-time pip; rebuild CRE with rpy2 "
-                        "pre-baked to skip this)..."
-                    )
                 subprocess.run(
-                    [sys.executable] + pip_flags + ["rpy2"],
-                    check=True, capture_output=True, timeout=pip_timeout,
-                    env=_r_subprocess_env(),
+                    [sys.executable, "-m", "pip", "install", "rpy2", "-q"],
+                    check=True, capture_output=True, timeout=120,
                 )
             result['rpy2_installed'] = True
 
             if not _tab_ok:
                 subprocess.run(
-                    [sys.executable] + pip_flags + ["tabulate"],
+                    [sys.executable, "-m", "pip", "install", "tabulate", "-q"],
                     check=True, capture_output=True, timeout=60,
-                    env=_r_subprocess_env(),
                 )
             result['tabulate_installed'] = True
         except subprocess.CalledProcessError as e:
-            err = (e.stderr or b"").decode(errors="replace") if e.stderr else str(e)
-            result['errors'].append(f"Failed to install packages: {err}")
+            result['errors'].append(f"Failed to install packages: {e}")
         except subprocess.TimeoutExpired:
-            result['errors'].append(
-                "Package installation timed out. Attach EAI for pypi.org or "
-                "rebuild the CRE image with rpy2 pre-installed."
-            )
+            result['errors'].append("Package installation timed out")
     
     # Register magic if requested
-    try:
-        if register_magic and result['rpy2_installed']:
-            try:
-                ip = get_ipython()
-                ip.register_magics(_build_safe_r_magics_class())
-                result['magic_registered'] = True
-            except NameError:
-                result['errors'].append(
-                    "Not in IPython environment, cannot register magic"
-                )
-            except Exception as e:
-                result['errors'].append(f"Failed to register magic: {e}")
-        
-        # Configure R console width for better output formatting
-        if result['rpy2_installed']:
-            try:
-                import rpy2.robjects as ro
-                ro.r('options(width = 200)')  # Wide console output for notebooks
-                ro.r('options(tibble.width = Inf)')  # Show all tibble columns
-                ro.r('options(pillar.width = Inf)')  # Pillar (tibble printing) width
-                ro.r('options(tibble.print_max = 50)')  # Show more rows
-                result['console_configured'] = True
-                
-                # Load output helpers for cleaner formatting in Workspace Notebooks
-                ro.r(R_OUTPUT_HELPERS_CODE)
-                result['output_helpers_loaded'] = True
-            except Exception as e:
-                result['errors'].append(f"Failed to configure R console: {e}")
-    finally:
-        _restore_cwd(prev_cwd)
+    if register_magic and result['rpy2_installed']:
+        try:
+            ip = get_ipython()
+            ip.register_magics(_build_safe_r_magics_class())
+            result['magic_registered'] = True
+        except NameError:
+            result['errors'].append("Not in IPython environment, cannot register magic")
+        except Exception as e:
+            result['errors'].append(f"Failed to register magic: {e}")
+    
+    # Configure R console width for better output formatting
+    if result['rpy2_installed']:
+        try:
+            import rpy2.robjects as ro
+            ro.r('options(width = 200)')  # Wide console output for notebooks
+            ro.r('options(tibble.width = Inf)')  # Show all tibble columns
+            ro.r('options(pillar.width = Inf)')  # Pillar (tibble printing) width
+            ro.r('options(tibble.print_max = 50)')  # Show more rows
+            result['console_configured'] = True
+            
+            # Load output helpers for cleaner formatting in Workspace Notebooks
+            ro.r(R_OUTPUT_HELPERS_CODE)
+            result['output_helpers_loaded'] = True
+        except Exception as e:
+            result['errors'].append(f"Failed to configure R console: {e}")
     
     result['success'] = len(result['errors']) == 0
     return result
-
-
-def enable_r_cells(**kwargs) -> Dict[str, Any]:
-    """Fast path: register ``%%R`` on CRE or after micromamba bootstrap.
-
-    Same as ``setup_r_environment()`` — use this name in notebook setup cells.
-    """
-    return setup_r_environment(**kwargs)
 
 
 class RMagicExecutionError(Exception):
@@ -532,6 +398,33 @@ def _resolve_var(name, local_ns, shell):
     return None
 
 
+def _normalize_r_magic_io_flags(line: str) -> str:
+    """Collapse spaces around commas in ``-i`` / ``-o`` variable lists.
+
+    IPython passes only the first line of a ``%%R`` cell as *line*; the R body
+    is separate (*cell*).  Whitespace tokenization of ``-o p, mtcars`` yields
+    ``['-o', 'p,', 'mtcars']`` — the orphan ``mtcars`` is treated as input to
+    inject, producing errors like ``could not find function "mtcarslibrary"``.
+
+    Rewrite to ``-o p,mtcars`` before ``line.split()`` and before rpy2 parsing.
+    """
+    import re
+
+    def _collapse(match: re.Match) -> str:
+        flag = match.group(1)
+        raw = match.group(2)
+        names = [name.strip() for name in raw.split(',') if name.strip()]
+        if not names:
+            return match.group(0)
+        return f"{flag} {','.join(names)}"
+
+    pattern = (
+        r'(-i|-o|--input|--output)\s+'
+        r'((?:[^-\s]\S*\s*,\s*)+[^-\s]\S*)'
+    )
+    return re.sub(pattern, _collapse, line)
+
+
 def _build_safe_r_magics_class():
     """Build and return an RMagics subclass with improved behaviour.
 
@@ -566,6 +459,9 @@ def _build_safe_r_magics_class():
        is checked and aligned between the Snowpark and R sessions.
     5. **``--time``** — prints wall-clock execution time.
     6. **``--silent``** — suppresses all R text output.
+    7. **``-i`` / ``-o`` list normalization** — ``-o p, mtcars`` (spaces after
+       commas) is rewritten to ``-o p,mtcars`` so rpy2 does not treat trailing
+       names as stray ``-i`` injections.
     """
     import time
     import IPython.core.magic
@@ -611,6 +507,7 @@ def _build_safe_r_magics_class():
             o_vars = []
 
             if cell is not None:
+                line = _normalize_r_magic_io_flags(line)
                 parts = line.split()
                 if "--time" in parts:
                     show_time = True

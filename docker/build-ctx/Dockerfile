@@ -29,7 +29,7 @@ COPY cre_multilang_r.yaml /tmp/cre_multilang_r.yaml
 COPY 00-sfnb-enable-r.py /tmp/00-sfnb-enable-r.py
 COPY r_helpers.py /tmp/r_helpers.py
 COPY sfnb_setup.py /tmp/sfnb_setup.py
-ARG SFNB_CRE_IMAGE_TAG=v2
+ARG SFNB_CRE_IMAGE_TAG=v1
 ARG SFNB_CRE_ADBC=1
 RUN chmod +x /tmp/install_prebaked_r.sh /tmp/cre_extra_install.sh \
     && SFNB_CRE_IMAGE_TAG="${SFNB_CRE_IMAGE_TAG}" SFNB_CRE_ADBC="${SFNB_CRE_ADBC}" bash /tmp/install_prebaked_r.sh \
