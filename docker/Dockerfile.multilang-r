@@ -1,6 +1,7 @@
 # Custom Runtime Image: R + snowflakeR/RSnowflake pre-baked for Workspace Notebooks
 #
-# Extends the official snowbooks ML runtime base (required for CRE validation).
+# Extends the official Snowflake Container Runtime (snowbooks) base image,
+# which CRE validation requires.
 # See docs/custom_runtime_images.md for build/push/register workflow.
 #
 # Build (replace REGISTRY_URL with your account registry from `snow spcs image-registry login`):
@@ -10,9 +11,9 @@
 #     -t sfnb-multilang-r:v1 .
 
 ARG REGISTRY_URL
-ARG SNOWBOOKS_TAG=2.5.0
+ARG SNOWBOOKS_TAG=2.9.0
 
-FROM ${REGISTRY_URL}/snowflake/images/snowflake_images/st_plat/runtime/x86/runtime_image/snowbooks:${SNOWBOOKS_TAG}
+FROM ${REGISTRY_URL}/snowflake/images/snowflake_images/container_runtime/cpu_x86_64:${SNOWBOOKS_TAG}
 
 # CRE validation requires this env var on custom images.
 ENV DASHBOARD_PORT=12003
