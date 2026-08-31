@@ -20,6 +20,10 @@ build/
 # Generated files
 eai_setup.sql
 
+# Local build profile — configs/cre_profile.example.yaml tells you to copy it
+# to this name, and it holds your account registry host and image repo path.
+configs/cre_profile.yaml
+
 # OS files
 .DS_Store
 Thumbs.db
