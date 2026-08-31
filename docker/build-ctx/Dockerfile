@@ -6,7 +6,7 @@
 #   docker build --build-arg REGISTRY_LOCAL_URL=... -f Dockerfile .
 
 ARG REGISTRY_LOCAL_URL
-ARG SNOWBOOKS_TAG=2.7.2
+ARG SNOWBOOKS_TAG=2.9.0
 FROM ${REGISTRY_LOCAL_URL}/snowflake/images/snowflake_images/container_runtime/cpu_x86_64:${SNOWBOOKS_TAG}
 
 ENV DASHBOARD_PORT=12003
