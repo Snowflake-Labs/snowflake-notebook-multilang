@@ -25,6 +25,14 @@ CONDA_PACKAGES=(
   "r-dbi>=1.2.0"
   "r-jsonlite"
   "r-dplyr>=1.1.0"
+  # Common analysis/viz companions beyond core tidyverse — baked in so
+  # typical demo/EDA notebooks (e.g. timeseries + multi-panel figures)
+  # don't need a runtime install.packages() call.
+  "r-zoo"
+  "r-cowplot"
+  "r-scales"
+  "r-patchwork"
+  "r-arrow"
 )
 
 # Arrow helpers used with ADBC / nanoarrow pipelines (small conda add-on).

@@ -37,6 +37,12 @@ languages:
       - r-dbi>=1.2.0
       - r-jsonlite
       - r-dplyr>=1.1.0
+      # Common analysis/viz companions beyond core tidyverse.
+      - r-zoo
+      - r-cowplot
+      - r-scales
+      - r-patchwork
+      - r-arrow
     cran_packages: []
     addons:
       adbc: true   # baked into reference CRE v1 (go + libadbc-driver-snowflake + adbcsnowflake)
