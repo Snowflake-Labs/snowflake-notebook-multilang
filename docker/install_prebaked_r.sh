@@ -4,7 +4,7 @@
 set -euo pipefail
 
 ENV_NAME="${SFNB_ENV_NAME:-workspace_env}"
-R_VERSION="${SFNB_R_VERSION:-4.5.2}"
+R_VERSION="${SFNB_R_VERSION:-4.5.3}"
 MM_ROOT="${SFNB_MICROMAMBA_ROOT:-/home/jupyter/micromamba}"
 CONDA_CHANNEL="${SFNB_CONDA_CHANNEL:-conda-forge}"
 # ADBC: slow at notebook runtime (~2 min); bake by default (set SFNB_CRE_ADBC=0 to skip).
@@ -25,6 +25,14 @@ CONDA_PACKAGES=(
   "r-dbi>=1.2.0"
   "r-jsonlite"
   "r-dplyr>=1.1.0"
+  # Common analysis/viz companions beyond core tidyverse — baked in so
+  # typical demo/EDA notebooks (e.g. timeseries + multi-panel figures)
+  # don't need a runtime install.packages() call.
+  "r-zoo"
+  "r-cowplot"
+  "r-scales"
+  "r-patchwork"
+  "r-arrow"
 )
 
 # Arrow helpers used with ADBC / nanoarrow pipelines (small conda add-on).
@@ -34,8 +42,8 @@ ADBC_CONDA_PACKAGES=(
   "r-nanoarrow"
 )
 
-SNOWFLAKER_TARBALL="${SNOWFLAKER_TARBALL:-https://github.com/Snowflake-Labs/snowflakeR/releases/download/v0.1.0/snowflakeR_0.1.0.tar.gz}"
-RSNOWFLAKE_TARBALL="${RSNOWFLAKE_TARBALL:-https://github.com/Snowflake-Labs/RSnowflake/releases/download/v0.2.0/RSnowflake_0.2.0.tar.gz}"
+SNOWFLAKER_TARBALL="${SNOWFLAKER_TARBALL:-https://github.com/Snowflake-Labs/snowflakeR/releases/download/v0.2.0/snowflakeR_0.2.0.tar.gz}"
+RSNOWFLAKE_TARBALL="${RSNOWFLAKE_TARBALL:-https://github.com/Snowflake-Labs/RSnowflake/releases/download/v0.2.2/RSnowflake_0.2.2.tar.gz}"
 
 echo "==> sfnb-multilang CRE pre-bake (${CRE_IMAGE_TAG}, env=${ENV_NAME}, R=${R_VERSION}, adbc=${SFNB_CRE_ADBC})"
 
@@ -164,7 +172,11 @@ for PY in /opt/python/cpython-*/bin/python3 /usr/bin/python3; do
 done
 
 if [[ -n "${NOTEBOOK_PY}" ]]; then
-  echo "==> pip install rpy2 + tabulate into ${NOTEBOOK_PY}"
+  # rpy2 (API mode) needs R in PATH and R_HOME set to build. The conda env's R
+  # isn't on the notebook Python's PATH by default, so export both here.
+  export R_HOME="${ENV_PREFIX}/lib/R"
+  export PATH="${ENV_PREFIX}/bin:${PATH}"
+  echo "==> pip install rpy2 + tabulate into ${NOTEBOOK_PY} (R_HOME=${R_HOME})"
   "${NOTEBOOK_PY}" -m pip install -q --break-system-packages 'rpy2>=3.5,<4' tabulate \
     || echo "WARN: pip rpy2/tabulate failed"
 

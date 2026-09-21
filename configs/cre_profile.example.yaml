@@ -17,8 +17,8 @@ cre:
   tag: v1
   # Label stamped in /opt/sfnb/CRE_VERSION inside the image
   version_label: v1
-  r_version: "4.5.2"
-  snowbooks_tag: "2.5.0"
+  r_version: "4.5.3"
+  snowbooks_tag: "2.9.0"
   # Bake ADBC (adbcsnowflake) — adds ~2–3 min to image build
   adbc: true
   # YAML copied to /opt/sfnb/config/ in the image (default: lean v1 preset)
@@ -32,8 +32,8 @@ snowflake:
 
 # Optional: override snowflakeR / RSnowflake tarball URLs at build time
 tarballs:
-  snowflakeR: "https://github.com/Snowflake-Labs/snowflakeR/releases/download/v0.1.0/snowflakeR_0.1.0.tar.gz"
-  RSnowflake: "https://github.com/Snowflake-Labs/RSnowflake/releases/download/v0.2.0/RSnowflake_0.2.0.tar.gz"
+  snowflakeR: "https://github.com/Snowflake-Labs/snowflakeR/releases/download/v0.2.0/snowflakeR_0.2.0.tar.gz"
+  RSnowflake: "https://github.com/Snowflake-Labs/RSnowflake/releases/download/v0.2.2/RSnowflake_0.2.2.tar.gz"
 
 # Extra packages baked into the image (beyond the v1 defaults)
 extras:
